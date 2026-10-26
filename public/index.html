@@ -608,7 +608,13 @@ function subscribeAll(){
     state.orders = snap.docs.map(d=>({id:d.id, ...d.data()}));
     state.ready = true;
     render();
-  }, err=>{ console.error(err); seedLocal(); state.ready=true; render(); });
+  }, err=>{
+    // Never show an empty ledger when loading failed: it looks like the data is gone.
+    console.error(err);
+    state.ready = false;
+    renderNav();
+    document.getElementById('page').innerHTML = `<div class="empty">Couldn't load ${escapeHtml(companyLabel(company()))}'s data${err.code==='permission-denied'?': this account isn\'t allowed to read it':''}.<br>Nothing has been deleted. Try reloading, or ask the admin.</div>`;
+  });
 
   fb.onSnapshot(colRef('reps'), snap=>{
     const m = {};
