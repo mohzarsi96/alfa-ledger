@@ -1,0 +1,8 @@
+# Secrets and business data: never commit
+serviceAccount.json
+*-firebase-adminsdk-*.json
+data-export.json
+
+node_modules/
+.firebase/
+*.log

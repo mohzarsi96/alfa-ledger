@@ -1,0 +1,2249 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Alfa Enterprises — Sales &amp; Incentive Ledger</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+:root{
+  --bg:#F4F6F8;
+  --surface:#FFFFFF;
+  --surface-sunk:#EBEFF3;
+  --ink:#14202E;
+  --ink-soft:#526173;
+  --ink-faint:#8794A4;
+  --border:#D8DFE7;
+  --border-soft:#E6EBF0;
+  --accent:#1F5F8B;
+  --accent-2:#2B7BAE;
+  --accent-ink:#123B5A;
+  --accent-soft:#DCEAF4;
+  --cta:#F59E0B;
+  --cta-ink:#2A1A00;
+  --positive:#1E8A5A;
+  --positive-soft:#DDF1E6;
+  --negative:#D2453D;
+  --negative-soft:#FBE4E1;
+  --warn:#9A6208;
+  --warn-soft:#FDF1D6;
+  --nav-bg:#13263A;
+  --nav-ink:#B9C8D8;
+  --radius:12px;
+  --radius-sm:8px;
+  --radius-pill:999px;
+  --sidebar-w:246px;
+  --shadow-sm:0 1px 2px rgba(16,32,50,0.06), 0 1px 1px rgba(16,32,50,0.04);
+  --shadow-md:0 10px 28px -14px rgba(16,32,50,0.25), 0 2px 6px -2px rgba(16,32,50,0.08);
+  --shadow-lg:0 24px 60px -20px rgba(10,22,36,0.4), 0 4px 12px -4px rgba(10,22,36,0.12);
+}
+:root:not([data-theme="light"]){
+  @media (prefers-color-scheme: dark){
+    --bg:#0E1721;
+    --surface:#15212E;
+    --surface-sunk:#0B121A;
+    --ink:#E6EDF4;
+    --ink-soft:#9FB0C2;
+    --ink-faint:#6A7C90;
+    --border:#26364A;
+    --border-soft:#1E2C3C;
+    --accent:#5AA3D6;
+    --accent-2:#7DB9E3;
+    --accent-ink:#BFE0F7;
+    --accent-soft:#1B3347;
+    --cta:#F5A524;
+    --cta-ink:#2A1A00;
+    --positive:#5FCB98;
+    --positive-soft:#16291F;
+    --negative:#F07A72;
+    --negative-soft:#321C1B;
+    --warn:#E8B64F;
+    --warn-soft:#2E2512;
+    --nav-bg:#0A121B;
+    --nav-ink:#9FB0C2;
+    --shadow-sm:0 1px 2px rgba(0,0,0,0.35);
+    --shadow-md:0 10px 28px -14px rgba(0,0,0,0.55), 0 2px 6px -2px rgba(0,0,0,0.3);
+    --shadow-lg:0 24px 60px -20px rgba(0,0,0,0.65);
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0E1721;
+  --surface:#15212E;
+  --surface-sunk:#0B121A;
+  --ink:#E6EDF4;
+  --ink-soft:#9FB0C2;
+  --ink-faint:#6A7C90;
+  --border:#26364A;
+  --border-soft:#1E2C3C;
+  --accent:#5AA3D6;
+  --accent-2:#7DB9E3;
+  --accent-ink:#BFE0F7;
+  --accent-soft:#1B3347;
+  --cta:#F5A524;
+  --cta-ink:#2A1A00;
+  --positive:#5FCB98;
+  --positive-soft:#16291F;
+  --negative:#F07A72;
+  --negative-soft:#321C1B;
+  --warn:#E8B64F;
+  --warn-soft:#2E2512;
+  --nav-bg:#0A121B;
+  --nav-ink:#9FB0C2;
+  --shadow-sm:0 1px 2px rgba(0,0,0,0.35);
+  --shadow-md:0 10px 28px -14px rgba(0,0,0,0.55), 0 2px 6px -2px rgba(0,0,0,0.3);
+  --shadow-lg:0 24px 60px -20px rgba(0,0,0,0.65);
+}
+*{box-sizing:border-box;}
+html,body{margin:0;padding:0;}
+body{
+  background:
+    radial-gradient(1200px 500px at 100% -10%, color-mix(in srgb, var(--accent) 7%, transparent), transparent 60%),
+    var(--bg);
+  color:var(--ink);
+  font-family:'IBM Plex Sans',sans-serif;
+  font-size:14px;
+  line-height:1.5;
+  -webkit-font-smoothing:antialiased;
+}
+.num{font-family:'IBM Plex Mono',monospace;font-variant-numeric:tabular-nums;}
+h1,h2,h3,.serif{font-family:'Fraunces',serif;}
+a{color:inherit;}
+::selection{background:var(--accent-soft);}
+
+/* ---- layout ---- */
+#shell{display:flex;min-height:100vh;}
+#sidebar{
+  width:var(--sidebar-w);
+  flex-shrink:0;
+  background:var(--surface);
+  border-right:1px solid var(--border);
+  display:flex;
+  flex-direction:column;
+  position:sticky;
+  top:0;
+  height:100vh;
+  box-shadow:1px 0 0 var(--border), 4px 0 24px -18px rgba(20,18,10,0.25);
+  z-index:5;
+}
+#brand{padding:28px 22px 20px;border-bottom:1px solid var(--border-soft);display:flex;align-items:center;gap:12px;}
+#brand .mark{
+  width:38px;height:38px;border-radius:11px;flex-shrink:0;
+  background:linear-gradient(150deg, var(--accent-2), var(--accent) 65%, var(--accent-ink));
+  display:flex;align-items:center;justify-content:center;
+  font-family:'Fraunces',serif;font-weight:700;color:#fff;font-size:16px;
+  box-shadow:var(--shadow-sm), inset 0 1px 0 rgba(255,255,255,0.25);
+}
+#brand .word{font-family:'Fraunces',serif;font-weight:600;font-size:20px;letter-spacing:0.005em;line-height:1.15;}
+#brand .word em{font-style:normal;color:var(--accent);}
+#brand .sub{color:var(--ink-soft);font-size:11.5px;margin-top:2px;}
+nav{padding:16px 12px;flex:1;overflow-y:auto;}
+nav a{
+  display:flex;align-items:center;gap:10px;
+  padding:10px 12px;border-radius:var(--radius-sm);
+  color:var(--ink-soft);text-decoration:none;font-size:13.5px;font-weight:500;
+  margin-bottom:3px;cursor:pointer;
+  transition:background .14s ease, color .14s ease, transform .14s ease;
+}
+nav a svg{width:16px;height:16px;flex-shrink:0;opacity:0.8;}
+nav a:hover{background:var(--surface-sunk);color:var(--ink);}
+nav a.active{
+  background:linear-gradient(135deg, var(--accent-soft), color-mix(in srgb, var(--accent-soft) 60%, var(--surface)));
+  color:var(--accent-ink);font-weight:600;box-shadow:var(--shadow-sm), inset 0 0 0 1px color-mix(in srgb, var(--accent) 30%, transparent);
+}
+nav a.active svg{opacity:1;}
+#sidebar-foot{padding:16px 22px;border-top:1px solid var(--border-soft);}
+#sidebar-foot .rate{font-size:12px;color:var(--ink-soft);}
+#sidebar-foot .rate b{color:var(--accent-ink);font-family:'IBM Plex Mono',monospace;}
+
+#main{flex:1;min-width:0;padding:32px 42px 60px;max-width:1260px;}
+.pagehead{display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:24px;gap:16px;flex-wrap:wrap;}
+.pagehead h1{font-size:27px;font-weight:600;margin:0 0 5px;letter-spacing:-0.01em;}
+.pagehead p{margin:0;color:var(--ink-soft);font-size:13.5px;max-width:540px;}
+.pagehead .actions{display:flex;gap:8px;flex-wrap:wrap;}
+
+/* ---- buttons/inputs ---- */
+button{font-family:inherit;font-size:13px;cursor:pointer;}
+.btn{
+  padding:9px 15px;border-radius:var(--radius-sm);border:1px solid var(--border);
+  background:var(--surface);color:var(--ink);font-weight:500;
+  display:inline-flex;align-items:center;gap:6px;
+  box-shadow:var(--shadow-sm);
+  transition:transform .12s ease, box-shadow .12s ease, border-color .12s ease, background .12s ease;
+}
+.btn:hover{border-color:var(--ink-faint);transform:translateY(-1px);box-shadow:var(--shadow-md);}
+.btn:active{transform:translateY(0);}
+.btn-primary{background:linear-gradient(160deg, color-mix(in srgb, var(--ink) 92%, var(--accent)), var(--ink));color:var(--surface);border-color:var(--ink);}
+.btn-primary:hover{opacity:0.94;}
+.btn-accent{background:linear-gradient(160deg, var(--accent-2), var(--accent));color:#fff;border-color:var(--accent);}
+.btn-accent:hover{opacity:0.94;}
+.btn-ghost{border-color:transparent;background:transparent;box-shadow:none;}
+.btn-ghost:hover{background:var(--surface-sunk);box-shadow:none;transform:none;}
+.btn-sm{padding:6px 11px;font-size:12px;}
+.btn-danger{color:var(--negative);}
+.btn-danger#confirm-ok{color:#fff;background:var(--negative);border-color:var(--negative);}
+.sort-arrow{font-size:11px;}
+input,select,textarea{
+  font-family:inherit;font-size:13px;color:var(--ink);
+  background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);
+  padding:8px 11px;width:100%;
+  transition:border-color .12s ease, box-shadow .12s ease;
+}
+input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);}
+label{display:block;font-size:12px;color:var(--ink-soft);margin-bottom:5px;font-weight:500;}
+.field{margin-bottom:14px;}
+.field-row{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+
+/* ---- cards ---- */
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow-sm);}
+.kpi-row{display:grid;grid-template-columns:repeat(5,1fr);gap:14px;margin-bottom:26px;}
+.kpi{
+  background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);
+  padding:18px 18px 16px;box-shadow:var(--shadow-sm);position:relative;overflow:hidden;
+  transition:transform .15s ease, box-shadow .15s ease;
+}
+.kpi:hover{transform:translateY(-2px);box-shadow:var(--shadow-md);}
+.kpi .icon-chip{
+  width:30px;height:30px;border-radius:9px;display:flex;align-items:center;justify-content:center;margin-bottom:12px;
+  background:var(--surface-sunk);color:var(--ink-soft);
+}
+.kpi .icon-chip svg{width:16px;height:16px;}
+.kpi.hero .icon-chip{background:linear-gradient(150deg, var(--accent-soft), color-mix(in srgb, var(--accent-soft) 40%, var(--surface)));color:var(--accent-ink);}
+.kpi .label{font-size:11.5px;color:var(--ink-soft);margin-bottom:2px;}
+.kpi .value{font-family:'IBM Plex Mono',monospace;font-size:22px;font-weight:600;font-variant-numeric:tabular-nums;letter-spacing:-0.01em;}
+.kpi .value.accent{background:linear-gradient(120deg, var(--accent-ink), var(--accent));-webkit-background-clip:text;background-clip:text;color:transparent;}
+.kpi .value.pos{color:var(--positive);}
+.kpi .value.neg{color:var(--negative);}
+.kpi .sub{font-size:11px;color:var(--ink-faint);margin-top:5px;}
+
+.chart-row{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-bottom:26px;}
+.panel{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:20px 22px;box-shadow:var(--shadow-sm);}
+.panel h3{font-size:14px;font-weight:600;margin:0 0 14px;font-family:'IBM Plex Sans',sans-serif;}
+.panel-chart{height:230px;position:relative;}
+.panel-chart.tall{height:300px;}
+tfoot .tot-row td{padding:12px 16px;font-weight:700;background:var(--accent-soft);color:var(--accent-ink);border-top:2px solid var(--accent);}
+tr .status-cell{display:flex;align-items:center;gap:6px;}
+.inc-lock{color:var(--ink-faint);}
+.inc-lock.locked{color:var(--positive);}
+.inc-lock:hover{background:var(--surface-sunk);color:var(--ink);}
+.bulk-bar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:var(--accent-soft);border:1px solid var(--accent);border-radius:var(--radius);padding:10px 14px;margin-bottom:14px;color:var(--accent-ink);font-weight:600;font-size:13px;}
+.exp-total{display:flex;justify-content:space-between;align-items:center;padding:12px 14px;margin-top:6px;background:var(--accent-soft);color:var(--accent-ink);border-radius:var(--radius-sm);font-weight:700;}
+h3.share-title{text-align:center;text-transform:uppercase;letter-spacing:.02em;font-weight:800;font-size:17px;}
+
+/* ---- tables ---- */
+.table-wrap{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);overflow-x:auto;box-shadow:var(--shadow-sm);}
+table{width:100%;border-collapse:collapse;font-size:13px;}
+thead th{
+  text-align:left;padding:11px 16px;font-size:10.5px;color:var(--ink-soft);
+  border-bottom:1px solid var(--border);white-space:nowrap;font-weight:600;
+  background:var(--surface-sunk);position:sticky;top:0;letter-spacing:0.02em;
+}
+tbody td{padding:11px 16px;border-bottom:1px solid var(--border-soft);white-space:nowrap;}
+tbody tr:last-child td{border-bottom:none;}
+tbody tr{transition:background .1s ease;}
+tbody tr:hover{background:var(--surface-sunk);}
+td.num,th.num{text-align:right;font-family:'IBM Plex Mono',monospace;font-variant-numeric:tabular-nums;}
+td.ref{white-space:normal;max-width:260px;font-weight:500;}
+td.ref .sub{font-size:11px;color:var(--ink-faint);font-family:'IBM Plex Sans',sans-serif;}
+
+.pill{display:inline-block;padding:4px 10px;border-radius:var(--radius-pill);font-size:11px;font-weight:600;}
+.pill-paid{background:var(--positive-soft);color:var(--positive);}
+.pill-partial{background:var(--warn-soft);color:var(--warn);}
+.pill-unpaid{background:var(--negative-soft);color:var(--negative);}
+.pill-pending{background:var(--surface-sunk);color:var(--ink-faint);}
+
+.toolbar{display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap;align-items:center;}
+.toolbar input[type=search]{max-width:240px;}
+.toolbar select{width:auto;min-width:130px;}
+.toolbar .spacer{flex:1;}
+
+/* ---- modal ---- */
+.overlay{position:fixed;inset:0;background:rgba(15,18,12,0.55);backdrop-filter:blur(2px);display:flex;align-items:flex-start;justify-content:center;padding:5vh 20px;z-index:100;overflow-y:auto;animation:fadeIn .15s ease;}
+@keyframes fadeIn{from{opacity:0;}to{opacity:1;}}
+@keyframes riseIn{from{opacity:0;transform:translateY(10px) scale(0.98);}to{opacity:1;transform:translateY(0) scale(1);}}
+.modal{background:var(--surface);border-radius:var(--radius);width:100%;max-width:560px;padding:28px 30px 30px;border:1px solid var(--border);box-shadow:var(--shadow-lg);animation:riseIn .18s cubic-bezier(.2,.8,.3,1);}
+.modal h2{font-size:19px;margin:0 0 18px;font-weight:600;}
+.modal .close{position:absolute;}
+.modal-foot{display:flex;justify-content:flex-end;gap:10px;margin-top:20px;padding-top:16px;border-top:1px solid var(--border-soft);}
+
+/* ---- misc ---- */
+.muted{color:var(--ink-faint);}
+.hint{font-size:12px;color:var(--ink-faint);margin-top:4px;}
+.empty{padding:50px 20px;text-align:center;color:var(--ink-faint);}
+.badge-count{background:var(--surface-sunk);color:var(--ink-soft);border-radius:var(--radius-pill);padding:1px 8px;font-size:11px;margin-left:auto;}
+.section-note{font-size:13px;color:var(--ink-soft);background:linear-gradient(135deg, var(--warn-soft), color-mix(in srgb, var(--warn-soft) 50%, var(--surface)));border:1px solid var(--border-soft);border-radius:var(--radius);padding:13px 16px;margin-bottom:18px;}
+.rep-group{margin-bottom:24px;}
+.rep-group-head{display:flex;justify-content:space-between;align-items:baseline;padding:13px 18px;background:var(--surface-sunk);border:1px solid var(--border);border-radius:var(--radius) var(--radius) 0 0;}
+.rep-group-head h4{margin:0;font-size:15px;font-family:'Fraunces',serif;font-weight:600;}
+.rep-group-head .amt{font-family:'IBM Plex Mono',monospace;font-weight:600;color:var(--accent-ink);}
+.rep-group .table-wrap{border-radius:0 0 var(--radius) var(--radius);border-top:none;}
+.settings-list{display:flex;flex-direction:column;gap:8px;}
+.settings-row{display:grid;grid-template-columns:70px 1fr;gap:10px;align-items:center;}
+.settings-row .code{font-family:'IBM Plex Mono',monospace;background:var(--surface-sunk);border-radius:var(--radius-sm);padding:6px 8px;text-align:center;font-size:12px;font-weight:600;}
+.toast{position:fixed;bottom:26px;right:26px;background:var(--ink);color:var(--bg);padding:12px 20px;border-radius:var(--radius-sm);font-size:13px;z-index:200;box-shadow:var(--shadow-lg);animation:riseIn .18s ease;}
+.icon-btn{background:transparent;border:none;color:var(--ink-faint);padding:5px;border-radius:var(--radius-sm);transition:background .12s ease,color .12s ease;}
+.icon-btn:hover{background:var(--negative-soft);color:var(--negative);}
+
+@media (max-width:900px){
+  #sidebar{position:fixed;left:0;top:0;bottom:0;transform:translateX(-100%);transition:transform .2s;z-index:150;}
+  #sidebar.open{transform:translateX(0);}
+  #main{padding:20px 16px 60px;}
+  .kpi-row{grid-template-columns:repeat(2,1fr);}
+  .chart-row{grid-template-columns:1fr;}
+  #menu-btn{display:inline-flex !important;}
+}
+.month-tabs{display:flex;gap:4px;margin-bottom:18px;flex-wrap:wrap;background:var(--surface-sunk);padding:4px;border-radius:var(--radius-pill);width:fit-content;max-width:100%;overflow-x:auto;}
+.month-tab{padding:8px 16px;font-size:13px;font-weight:500;color:var(--ink-soft);cursor:pointer;white-space:nowrap;border-radius:var(--radius-pill);transition:background .14s ease, color .14s ease;}
+.month-tab:hover{color:var(--ink);}
+.month-tab.active{color:#fff;background:linear-gradient(135deg, var(--accent-2), var(--accent));font-weight:600;box-shadow:var(--shadow-sm);}
+.month-tab-add{padding:8px 14px;font-size:16px;color:var(--ink-faint);cursor:pointer;line-height:1.1;border-radius:var(--radius-pill);transition:background .14s ease,color .14s ease;}
+.month-tab-add:hover{color:var(--accent);background:var(--surface);}
+#menu-btn{display:none;}
+/* ---- 60-30-10 theme: neutral canvas, slate/blue structure, amber for CTAs and status ---- */
+#sidebar{background:var(--nav-bg);border-right:none;box-shadow:none;}
+#brand{border-bottom:1px solid rgba(255,255,255,0.08);}
+#brand .word{color:#fff;}
+#brand .word em{color:var(--cta);}
+#brand .sub{color:var(--nav-ink);}
+#brand .mark{background:linear-gradient(150deg,#2B7BAE,#1F5F8B 65%,#123B5A);}
+nav a{color:var(--nav-ink);}
+nav a:hover{background:rgba(255,255,255,0.07);color:#fff;}
+nav a.active{background:rgba(255,255,255,0.1);color:#fff;box-shadow:inset 3px 0 0 var(--cta);}
+#sidebar-foot{border-top:1px solid rgba(255,255,255,0.08);}
+#sidebar-foot .rate{color:var(--nav-ink);}
+#sidebar-foot .rate b{color:var(--cta);}
+.btn-primary{background:var(--cta);color:var(--cta-ink);border-color:var(--cta);font-weight:600;}
+.btn-primary:hover{opacity:1;filter:brightness(1.06);}
+.btn-primary:disabled{opacity:.5;}
+.pagehead h1{color:var(--accent-ink);}
+:root[data-theme="dark"] .pagehead h1{color:var(--ink);}
+thead th{background:var(--accent-soft);color:var(--accent-ink);}
+.month-tabs{background:var(--surface-sunk);border:1px solid var(--border-soft);}
+.month-tab.active{background:var(--accent);color:#fff;}
+.kpi.hero{border-top:3px solid var(--accent);}
+.kpi .value.accent{background:none;-webkit-background-clip:initial;background-clip:initial;color:var(--accent);}
+.panel h3{color:var(--accent-ink);}
+.rep-group-head{background:var(--accent-soft);}
+.toast{background:var(--nav-bg);color:#fff;}
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]) thead th{background:var(--accent-soft);color:var(--accent-ink);} :root:not([data-theme="light"]) .pagehead h1{color:var(--ink);} }
+</style>
+</head>
+<body>
+<div id="shell">
+  <aside id="sidebar">
+    <div id="brand">
+      <div class="mark">A</div>
+      <div>
+        <div class="word">Alfa<em>·</em>Enterprises</div>
+        <div class="sub">Sales &amp; incentive ledger</div>
+      </div>
+    </div>
+    <nav id="nav"></nav>
+    <div id="sidebar-foot" hidden>
+      <div class="rate" id="signed-in-as" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></div>
+      <button class="btn btn-sm" id="btn-signout" style="margin-top:8px;">Sign out</button>
+    </div>
+  </aside>
+  <main id="main">
+    <button id="menu-btn" class="btn btn-sm" style="position:fixed;top:14px;left:14px;z-index:160;">☰</button>
+    <div id="page"></div>
+  </main>
+</div>
+
+<script>
+/* ============================================================
+   DATA
+   ============================================================ */
+const DEFAULT_REP_NAMES = {A:'Rep A', C:'Rep C', F:'Rep F', H:'Rep H', J:'Rep J', M:'Rep M'};
+const DEFAULT_CHANNEL_NAMES = {IM:'IM', A:'A', G:'G', C:'C'};
+
+let state = {
+  orders: [],
+  reps: {},        // code -> name
+  channels: {},    // code -> name
+  settings: {incentiveRate: 5},
+  expenses: {salaries:0, rent:0, electricity:0, fuel:0, marketing:0, other:0},
+  months: [],       // list of ledger-month tabs (YYYY-MM), manually added or inferred
+  ready: false,
+};
+let db = null;
+let currentPage = 'dashboard';
+let editingOrderId = null;
+let charts = {};
+
+/* ============================================================
+   CALC HELPERS
+   ============================================================ */
+function round2(n){ return Math.round((n + Number.EPSILON) * 100) / 100; }
+
+/* Standing rule: these salesmen are owners and never earn incentive. */
+const NON_INCENTIVE_REPS = ['f','m'];
+function isNonIncentiveRep(code){
+  const c = String(code||'').trim().toLowerCase();
+  const n = String((state.reps||{})[code]||'').trim().toLowerCase();
+  return NON_INCENTIVE_REPS.includes(c) || NON_INCENTIVE_REPS.includes(n);
+}
+function computeOrder(o){
+  const grossSales = Number(o.grossSales)||0;
+  const gstRate = Number(o.gstRate)||0;
+  const totalCost = (o.totalCost===null || o.totalCost===undefined || o.totalCost==='') ? null : Number(o.totalCost);
+  const status = o.paymentStatus || 'none'; // 'none' | 'partial' | 'full'
+
+  let grossProfit = null, netProfit = null;
+  if(totalCost !== null){
+    grossProfit = round2(grossSales - totalCost);
+    netProfit = round2(grossProfit / (1 + gstRate/100));
+  }
+
+  const rate = (state.settings.incentiveRate ?? 5);
+  let incentive = 0;
+  let incentiveNote = '';
+  if(isNonIncentiveRep(o.rep)){ incentiveNote = 'not eligible'; }
+  else if(status === 'noteligible'){ incentiveNote = 'not eligible'; }
+  else if(status === 'full'){
+    if(netProfit === null){ incentiveNote = 'cost pending'; }
+    else { incentive = round2(netProfit * rate / 100); }
+  }
+  const incMonth = o.incentiveMonth || o.ledgerMonth || '';
+  return {...o, incMonth, grossSales, gstRate, totalCost, status, grossProfit, netProfit, incentive, incentiveNote};
+}
+
+function computedOrders(){ return state.orders.map(computeOrder); }
+
+function fmtMoney(n){
+  if(n === null || n === undefined || isNaN(n)) return '—';
+  const neg = n < 0;
+  const v = Math.abs(n).toLocaleString('en-IN', {maximumFractionDigits:0});
+  return (neg?'−':'') + '₹' + v;
+}
+function fmtMoney2(n){
+  if(n === null || n === undefined || isNaN(n)) return '—';
+  const neg = n < 0;
+  const v = Math.abs(n).toLocaleString('en-IN', {minimumFractionDigits:2, maximumFractionDigits:2});
+  return (neg?'−':'') + '₹' + v;
+}
+function repName(code){ return state.reps[code] || code || '—'; }
+function chName(code){ return state.channels[code] || code || '—'; }
+function fmtDate(d){
+  if(!d) return '—';
+  const dt = new Date(d+'T00:00:00');
+  if(isNaN(dt)) return d;
+  return dt.toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'});
+}
+function statusPill(status){
+  if(status==='full') return '<span class="pill pill-paid">Fully received</span>';
+  if(status==='partial') return '<span class="pill pill-partial">Partially received</span>';
+  return '<span class="pill pill-unpaid">Not received</span>';
+}
+const STATUS_LABELS = {full:'Payment received', partial:'Pending', none:'Pending', noteligible:'Not eligible'};
+
+/* ============================================================
+   PERSISTENCE
+   ============================================================ */
+/* Firestore (modular SDK). The module script at the bottom of the page sets
+   window.fb = {db, collection, doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, onSnapshot, query, limit}
+   and calls startApp() once the user is signed in. */
+const colRef = name => fb.collection(fb.db, name);
+const docRef = path => fb.doc(fb.db, path);
+
+async function startApp(){
+  db = (window.fb && fb.db) || null;
+
+  if(!db){
+    // no db capability available -> operate in-memory only, seed directly
+    seedLocal();
+    state.ready = true;
+    render();
+    return;
+  }
+
+  await ensureSeeded();
+  subscribeAll();
+}
+
+function seedLocal(){
+  state.orders = [];
+  state.reps = {...DEFAULT_REP_NAMES};
+  state.channels = {...DEFAULT_CHANNEL_NAMES};
+  state.settings = {incentiveRate:5};
+  state.months = ['2026-08'];
+}
+
+async function ensureSeeded(){
+  // Sample data intentionally not auto-seeded — the ledger starts empty
+  // and is populated by real entries added through the app.
+  try{
+    const repSnap = await fb.getDocs(fb.query(colRef('reps'), fb.limit(1)));
+    if(repSnap.empty){
+      for(const code of Object.keys(DEFAULT_REP_NAMES)){
+        await fb.setDoc(docRef('reps/'+code), {code, name: DEFAULT_REP_NAMES[code]});
+      }
+    }
+  }catch(e){ console.error('seed reps failed', e); }
+
+  try{
+    const chSnap = await fb.getDocs(fb.query(colRef('channels'), fb.limit(1)));
+    if(chSnap.empty){
+      for(const code of Object.keys(DEFAULT_CHANNEL_NAMES)){
+        await fb.setDoc(docRef('channels/'+code), {code, name: DEFAULT_CHANNEL_NAMES[code]});
+      }
+    }
+  }catch(e){ console.error('seed channels failed', e); }
+
+  try{
+    const s = await fb.getDoc(docRef('meta/settings'));
+    if(!s.exists()){
+      await fb.setDoc(docRef('meta/settings'), {incentiveRate:5});
+    }
+  }catch(e){ console.error('seed settings failed', e); }
+
+  try{
+    const mo = await fb.getDoc(docRef('meta/months'));
+    if(!mo.exists()){
+      await fb.setDoc(docRef('meta/months'), {list:['2026-08']});
+    }
+  }catch(e){ console.error('seed months failed', e); }
+}
+
+function subscribeAll(){
+  fb.onSnapshot(colRef('orders'), snap=>{
+    state.orders = snap.docs.map(d=>({id:d.id, ...d.data()}));
+    state.ready = true;
+    render();
+  }, err=>{ console.error(err); seedLocal(); state.ready=true; render(); });
+
+  fb.onSnapshot(colRef('reps'), snap=>{
+    const m = {};
+    snap.docs.forEach(d=>{ const v=d.data(); m[v.code]=v.name; });
+    state.reps = m;
+    render();
+  });
+
+  fb.onSnapshot(colRef('channels'), snap=>{
+    const m = {};
+    snap.docs.forEach(d=>{ const v=d.data(); m[v.code]=v.name; });
+    state.channels = m;
+    render();
+  });
+
+  fb.onSnapshot(docRef('meta/settings'), snap=>{
+    if(snap.exists()) state.settings = snap.data();
+    render();
+  });
+
+  fb.onSnapshot(docRef('meta/expenses'), snap=>{
+    if(snap.exists()) state.expenses = {...state.expenses, ...snap.data()};
+    render();
+  });
+
+  fb.onSnapshot(docRef('meta/months'), snap=>{
+    state.months = snap.exists() ? (snap.data().list||['2026-08']) : ['2026-08'];
+    render();
+  });
+}
+
+async function saveOrder(order){
+  if(db){
+    const id = order.id || ('ord_'+Date.now()+'_'+Math.random().toString(36).slice(2,7));
+    const {id:_drop, ...body} = order;
+    body.updatedAt = new Date().toISOString();
+    if(!order.id) body.createdAt = new Date().toISOString();
+    await fb.setDoc(docRef('orders/'+id), body);
+  }else{
+    if(order.id){
+      const idx = state.orders.findIndex(o=>o.id===order.id);
+      if(idx>-1) state.orders[idx] = order;
+    }else{
+      order.id = 'ord_'+Date.now();
+      state.orders.push(order);
+    }
+    render();
+  }
+}
+async function deleteOrderById(id){
+  if(db){ await fb.deleteDoc(docRef('orders/'+id)); }
+  else{ state.orders = state.orders.filter(o=>o.id!==id); render(); }
+}
+async function updateOrderField(id, patch){
+  if(db){ await fb.updateDoc(docRef('orders/'+id), patch); }
+  else{
+    const idx = state.orders.findIndex(o=>o.id===id);
+    if(idx>-1) state.orders[idx] = {...state.orders[idx], ...patch};
+    render();
+  }
+}
+async function saveRepName(code, name){
+  if(db){ await fb.setDoc(docRef('reps/'+code), {code,name}); }
+  else{ state.reps[code]=name; render(); }
+}
+async function saveChannelName(code, name){
+  if(db){ await fb.setDoc(docRef('channels/'+code), {code,name}); }
+  else{ state.channels[code]=name; render(); }
+}
+async function deleteRep(code){
+  if(db){ await fb.deleteDoc(docRef('reps/'+code)); }
+  else{ delete state.reps[code]; render(); }
+}
+async function deleteChannel(code){
+  if(db){ await fb.deleteDoc(docRef('channels/'+code)); }
+  else{ delete state.channels[code]; render(); }
+}
+async function saveExpenses(exp){
+  if(db){ await fb.setDoc(docRef('meta/expenses'), exp); }
+  else{ state.expenses = exp; render(); }
+}
+async function saveSettings(newSettings){
+  if(db){ await fb.setDoc(docRef('meta/settings'), newSettings); }
+  else{ state.settings = newSettings; render(); }
+}
+function allMonthTabs(){
+  const set = new Set(state.months||[]);
+  state.orders.forEach(o=>{ if(o.ledgerMonth) set.add(o.ledgerMonth); });
+  return [...set].sort();
+}
+async function addMonthTab(month){
+  const list = Array.from(new Set([...(state.months||[]), month])).sort();
+  if(db){ await fb.setDoc(docRef('meta/months'), {list}); }
+  else{ state.months = list; render(); }
+}
+/* Removing a month also deletes the orders filed under it (a tab can't exist
+   without them, because allMonthTabs() derives tabs from orders as well). */
+async function removeMonthTab(month){
+  const ids = state.orders.filter(o=>o.ledgerMonth===month).map(o=>o.id);
+  const list = (state.months||[]).filter(m=>m!==month);
+  if(db){
+    for(let i=0;i<ids.length;i+=20){
+      await Promise.all(ids.slice(i,i+20).map(id=>fb.deleteDoc(docRef('orders/'+id))));
+    }
+    await fb.setDoc(docRef('meta/months'), {list});
+  }else{
+    state.orders = state.orders.filter(o=>o.ledgerMonth!==month);
+    state.months = list;
+    render();
+  }
+}
+function currentMonthKey(){
+  const d = new Date();
+  return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0');
+}
+/* Indian financial year: Apr 1 – Mar 31 */
+function fyStartYear(monthKey){
+  const [y,m] = monthKey.split('-').map(Number);
+  return m>=4 ? y : y-1;
+}
+function fyLabel(startYear){
+  return 'FY ' + String(startYear).slice(-2) + '-' + String(startYear+1).slice(-2);
+}
+function availableFYs(){
+  const set = new Set(allMonthTabs().map(fyStartYear));
+  return [...set].sort((a,b)=>b-a);
+}
+function monthsInFY(startYear){
+  return allMonthTabs().filter(m=>fyStartYear(m)===startYear).sort();
+}
+
+/* ============================================================
+   NAV
+   ============================================================ */
+const PAGES = [
+  {id:'dashboard', label:'Dashboard', icon:'M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6'},
+  {id:'orders', label:'Sale Orders', icon:'M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2'},
+  {id:'pnl', label:'P&L', icon:'M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14'},
+  {id:'channels', label:'Channel Summary', icon:'M11 3.055A9.001 9.001 0 1020.945 13H11V3.055z M20.488 9H15V3.512A9.025 9.025 0 0120.488 9z'},
+  {id:'salesmen', label:'Salesman Summary', icon:'M17 20h5v-2a4 4 0 00-3-3.87M9 20H4v-2a4 4 0 013-3.87m6-2.13a4 4 0 10-4-4 4 4 0 004 4zm6 0a4 4 0 10-1.13-7.84'},
+  {id:'incentives', label:'Incentives', icon:'M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V6m0 10v2m0-2c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z'},
+  {id:'monthly', label:'Monthly Summary', icon:'M8 7V3m8 4V3M4 11h16M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z'},
+  {id:'expenses', label:'Expenses & True NP', icon:'M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z'},
+  {id:'settings', label:'Settings', icon:'M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z M15 12a3 3 0 11-6 0 3 3 0 016 0z'},
+];
+
+function renderNav(){
+  const nav = document.getElementById('nav');
+  nav.innerHTML = PAGES.map(p=>`
+    <a data-page="${p.id}" class="${currentPage===p.id?'active':''}">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="${p.icon}"/></svg>
+      ${p.label}
+    </a>`).join('');
+  nav.querySelectorAll('a').forEach(a=>{
+    a.addEventListener('click', ()=>{ currentPage = a.dataset.page; document.getElementById('sidebar').classList.remove('open'); render(); });
+  });
+}
+function closeAllOverlays(){
+  document.querySelectorAll('.overlay').forEach(o=>o.remove());
+}
+function closeTopOverlay(){
+  const overlays = document.querySelectorAll('.overlay');
+  if(overlays.length && overlays[overlays.length-1].id !== 'login-overlay') overlays[overlays.length-1].remove();
+}
+document.addEventListener('keydown', e=>{
+  if(e.key==='Escape') closeTopOverlay();
+});
+document.getElementById('menu-btn').addEventListener('click', ()=> document.getElementById('sidebar').classList.toggle('open'));
+
+/* ============================================================
+   RENDER ROOT
+   ============================================================ */
+function render(){
+  renderNav();
+  const page = document.getElementById('page');
+  if(!state.ready){ page.innerHTML = '<div class="empty">Loading ledger…</div>'; return; }
+  Object.values(charts).forEach(c=>{ try{ c.destroy(); }catch(e){} });
+  charts = {};
+  if(currentPage==='dashboard') renderDashboard(page);
+  else if(currentPage==='orders') renderOrders(page);
+  else if(currentPage==='pnl') renderPnl(page);
+  else if(currentPage==='channels') renderChannels(page);
+  else if(currentPage==='salesmen') renderSalesmen(page);
+  else if(currentPage==='incentives') renderIncentives(page);
+  else if(currentPage==='monthly') renderMonthly(page);
+  else if(currentPage==='expenses') renderExpenses(page);
+  else if(currentPage==='settings') renderSettings(page);
+}
+
+/* ============================================================
+   DASHBOARD
+   ============================================================ */
+/* Business split: channel SR is the Lifting business; every other channel is Glass. */
+function businessOf(channelCode){
+  const c = String(channelCode||'').trim().toLowerCase();
+  const n = String(state.channels[channelCode]||'').trim().toLowerCase();
+  return (c==='sr' || n==='sr') ? 'Lifting' : 'Glass';
+}
+let dashboardFY = null;
+function fyMonthKeys(startYear){
+  const out=[];
+  for(let i=0;i<12;i++){ const m=((3+i)%12)+1; const y=m>=4?startYear:startYear+1; out.push(y+'-'+String(m).padStart(2,'0')); }
+  return out;
+}
+function renderDashboard(page){
+  const fys = availableFYs();
+  if(dashboardFY===null || (dashboardFY!=='all' && !fys.includes(dashboardFY))){
+    dashboardFY = fys.includes(fyStartYear(currentMonthKey())) ? fyStartYear(currentMonthKey()) : (fys[0] ?? 'all');
+  }
+  const all = computedOrders();
+  const orders = all.filter(o=> o.ledgerMonth && (dashboardFY==='all' || fyStartYear(o.ledgerMonth)===dashboardFY));
+  const totalGross = round2(orders.reduce((s,o)=>s+o.grossSales,0));
+  const known = orders.filter(o=>o.netProfit!==null);
+  const totalGrossProfit = round2(known.reduce((s,o)=>s+o.grossProfit,0));
+  const totalNet = round2(known.reduce((s,o)=>s+o.netProfit,0));
+  const costPendingCount = orders.filter(o=>o.totalCost===null).length;
+  const kGross = known.reduce((t,o)=>t+o.grossSales,0), kCost = known.reduce((t,o)=>t+o.totalCost,0);
+  const avgMarkup = kCost>0 ? (kGross/kCost-1)*100 : null;
+  const fyText = dashboardFY==='all' ? 'all years' : fyLabel(dashboardFY);
+  const icon = d => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="${d}"/></svg>`;
+
+  page.innerHTML = `
+    <div class="pagehead">
+      <div><h1>Dashboard</h1><p>Sales and profit for ${escapeHtml(fyText)} — ${orders.length} sale orders.</p></div>
+      <div class="actions"><select id="dash-fy" style="width:auto;min-width:130px;">
+        ${fys.map(y=>`<option value="${y}" ${dashboardFY===y?'selected':''}>${fyLabel(y)}</option>`).join('')}
+        <option value="all" ${dashboardFY==='all'?'selected':''}>All years</option>
+      </select></div>
+    </div>
+    <div class="kpi-row" style="grid-template-columns:repeat(4,1fr);">
+      <div class="kpi"><div class="icon-chip">${icon('M12 1v22M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6')}</div><div class="label">Gross sales</div><div class="value num">${fmtMoney(totalGross)}</div><div class="sub">${orders.length} orders · incl. GST</div></div>
+      <div class="kpi"><div class="icon-chip">${icon('M3 17l6-6 4 4 8-8M21 7v6M21 7h-6')}</div><div class="label">Gross profit</div><div class="value num ${totalGrossProfit>=0?'pos':'neg'}">${fmtMoney(totalGrossProfit)}</div><div class="sub">${costPendingCount? costPendingCount+' orders await cost entry':'incl. GST'}</div></div>
+      <div class="kpi hero"><div class="icon-chip">${icon('M12 2l2.5 6.5L21 9l-5 4.5L17.5 21 12 17l-5.5 4L8 13.5 3 9l6.5-.5z')}</div><div class="label">Net profit</div><div class="value num ${totalNet>=0?'pos':'neg'}">${fmtMoney(totalNet)}</div><div class="sub">GST-adjusted</div></div>
+      <div class="kpi"><div class="icon-chip">${icon('M7 17L17 7M9 7h8v8')}</div><div class="label">Average profit markup</div><div class="value num">${avgMarkup===null?'—':avgMarkup.toFixed(1)+'%'}</div><div class="sub">gross sales ÷ cost − 1</div></div>
+    </div>
+    <div class="chart-row" style="grid-template-columns:1fr;">
+      <div class="panel"><h3>Sales &amp; profit by month — ${escapeHtml(fyText)}</h3><div class="panel-chart tall"><canvas id="chTrend"></canvas></div></div>
+    </div>
+    <div class="chart-row">
+      <div class="panel"><h3>Sales by channel — monthly</h3><div class="panel-chart tall"><canvas id="chChSales"></canvas></div></div>
+      <div class="panel"><h3>Net profit by channel — monthly</h3><div class="panel-chart tall"><canvas id="chChProfit"></canvas></div></div>
+    </div>
+    <div class="chart-row">
+      <div class="panel"><h3 class="share-title">Sales by business</h3><div class="panel-chart tall"><canvas id="chBizSales"></canvas></div></div>
+      <div class="panel"><h3 class="share-title">Profit by business</h3><div class="panel-chart tall"><canvas id="chBizProfit"></canvas></div></div>
+    </div>
+  `;
+  document.getElementById('dash-fy').addEventListener('change', e=>{ dashboardFY = e.target.value==='all' ? 'all' : parseInt(e.target.value,10); renderDashboard(page); });
+
+  // month axis: 12 months of the FY, or every month with data for "all years"
+  const months = dashboardFY==='all' ? [...new Set(orders.map(o=>o.ledgerMonth))].sort() : fyMonthKeys(dashboardFY);
+  const mLabel = m => MONTH_NAMES[parseInt(m.split('-')[1],10)-1].slice(0,3)+' '+m.slice(2,4);
+  const labels = months.map(mLabel);
+  const sumBy = (list, fn) => months.map(m=>round2(list.filter(o=>o.ledgerMonth===m).reduce((t,o)=>t+fn(o),0)));
+  const lastM = orders.reduce((m,o)=>o.ledgerMonth>m?o.ledgerMonth:m,'');
+  const lineBy = (list, fn) => sumBy(list, fn).map((v,i)=> months[i]>lastM ? null : v);
+  const axisOpts = (extra={}) => ({
+    responsive:true, maintainAspectRatio:false,
+    interaction:{mode:'index', intersect:false},
+    plugins:{legend:{display:true, position:'top', labels:{color:getSoftColor(), font:{family:'IBM Plex Sans', size:12}, boxWidth:12}}, tooltip:{callbacks:{label:(ctx)=>ctx.dataset.label+': '+fmtMoney(ctx.parsed.y)}}},
+    scales:{
+      x:{grid:{display:false}, ticks:{color:getSoftColor(), font:{family:'IBM Plex Sans', size:11}}, ...(extra.x||{})},
+      y:{grid:{color:getGridColor()}, ticks:{color:getSoftColor(), font:{family:'IBM Plex Mono', size:10}, callback:v=>fmtMoney(v)}, ...(extra.y||{})}
+    }
+  });
+
+  // 1. trend: bars = gross sales, lines = gross & net profit
+  charts.trend = new Chart(document.getElementById('chTrend'), {
+    data:{labels, datasets:[
+      {type:'bar', label:'Gross sales', data:sumBy(orders,o=>o.grossSales), backgroundColor:'#7FA7C9', borderRadius:3, maxBarThickness:38, order:3},
+      {type:'line', label:'Gross profit', data:lineBy(known,o=>o.grossProfit), borderColor:'#1B8A8F', backgroundColor:'#1B8A8F', tension:.3, pointRadius:3, order:2},
+      {type:'line', label:'Net profit', data:lineBy(known,o=>o.netProfit), borderColor:'#F59E0B', backgroundColor:'#F59E0B', tension:.3, pointRadius:3, order:1}
+    ]},
+    options:axisOpts()
+  });
+
+  // channels present in this view, biggest first
+  const chTotals = {}; orders.forEach(o=>{ chTotals[o.channel]=(chTotals[o.channel]||0)+o.grossSales; });
+  const chCodes = Object.keys(chTotals).sort((a,b)=>chTotals[b]-chTotals[a]);
+  const col = i => SHARE_COLORS[i%SHARE_COLORS.length];
+
+  // 2. channel sales per month: stacked bars
+  charts.chSales = new Chart(document.getElementById('chChSales'), {
+    type:'bar',
+    data:{labels, datasets: chCodes.map((c,i)=>({label:chName(c), data:sumBy(orders.filter(o=>o.channel===c),o=>o.grossSales), backgroundColor:col(i), borderRadius:2, maxBarThickness:38}))},
+    options:axisOpts({x:{stacked:true}, y:{stacked:true}})
+  });
+  // 3. channel profit per month: lines
+  charts.chProfit = new Chart(document.getElementById('chChProfit'), {
+    type:'line',
+    data:{labels, datasets: chCodes.map((c,i)=>({label:chName(c), data:lineBy(known.filter(o=>o.channel===c),o=>o.netProfit), borderColor:col(i), backgroundColor:col(i), tension:.3, pointRadius:3}))},
+    options:axisOpts()
+  });
+  // 4. business split pies
+  const biz = {Lifting:{gross:0,net:0}, Glass:{gross:0,net:0}};
+  orders.forEach(o=>{ const b=biz[businessOf(o.channel)]; b.gross+=o.grossSales; if(o.netProfit!==null) b.net+=o.netProfit; });
+  charts.bizSales = shareChart('chBizSales', ['Glass','Lifting'], [biz.Glass.gross, biz.Lifting.gross], false);
+  charts.bizProfit = shareChart('chBizProfit', ['Glass','Lifting'], [biz.Glass.net, biz.Lifting.net], false);
+}
+
+function getAccentColor(){ return getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#A9772F'; }
+function getInkColor(){ return getComputedStyle(document.documentElement).getPropertyValue('--ink').trim() || '#16231D'; }
+function getGridColor(){ return getComputedStyle(document.documentElement).getPropertyValue('--border-soft').trim() || '#eee'; }
+function getSoftColor(){ return getComputedStyle(document.documentElement).getPropertyValue('--ink-soft').trim() || '#555'; }
+const PIE_COLORS = ['#1F5F8B','#1B8A8F','#64748B','#7FA7C9','#F59E0B'];
+const SHARE_COLORS = ['#1F5F8B','#1B8A8F','#64748B','#7FA7C9','#F59E0B','#3B8EA5','#94A3B8','#2F4B66','#5FB3B3','#C7D2DE'];
+const shareLabelsPlugin = {
+  id:'shareLabels',
+  afterDatasetsDraw(chart){
+    const meta = chart.getDatasetMeta(0), data = chart.data.datasets[0].data;
+    const tot = data.reduce((a,b)=>a+b,0); if(!tot) return;
+    const ctx = chart.ctx;
+    ctx.save();
+    ctx.font = "700 13px 'IBM Plex Sans', sans-serif"; ctx.textAlign='center'; ctx.textBaseline='middle';
+    meta.data.forEach((el,i)=>{
+      const pct = data[i]/tot*100; if(pct < 1.5) return;
+      const p = el.getProps(['x','y','startAngle','endAngle','innerRadius','outerRadius'], true);
+      const ang = (p.startAngle+p.endAngle)/2, rad = (p.innerRadius+p.outerRadius)/2 * (p.innerRadius? 1 : 0.74);
+      const x = p.x + Math.cos(ang)*rad, y = p.y + Math.sin(ang)*rad;
+      const txt = Math.round(pct)+'%', w = ctx.measureText(txt).width+14, h = 24;
+      ctx.shadowColor='rgba(0,0,0,0.35)'; ctx.shadowBlur=4; ctx.shadowOffsetY=2;
+      ctx.fillStyle='#3a3a3a'; ctx.beginPath();
+      if(ctx.roundRect) ctx.roundRect(x-w/2, y-h/2, w, h, 3); else ctx.rect(x-w/2, y-h/2, w, h);
+      ctx.fill();
+      ctx.shadowColor='transparent'; ctx.fillStyle='#fff'; ctx.fillText(txt, x, y+1);
+    });
+    ctx.restore();
+  }
+};
+function shareChart(canvasId, labels, values, doughnut){
+  return new Chart(document.getElementById(canvasId), {
+    type: doughnut ? 'doughnut' : 'pie',
+    data:{labels, datasets:[{data:values.map(v=>Math.max(round2(v),0)), backgroundColor:labels.map((_,i)=>SHARE_COLORS[i%SHARE_COLORS.length]), borderWidth:0}]},
+    options:{
+      responsive:true, maintainAspectRatio:false, cutout: doughnut ? '48%' : 0,
+      layout:{padding:8},
+      plugins:{
+        legend:{display:true, position:'right', labels:{color:getSoftColor(), font:{family:'IBM Plex Sans', size:14}, boxWidth:16, boxHeight:16, usePointStyle:true, pointStyle:'rect'}},
+        tooltip:{callbacks:{label:(ctx)=>{
+          const tot = ctx.dataset.data.reduce((a,b)=>a+b,0);
+          return ctx.label+': '+fmtMoney(ctx.parsed)+' ('+(tot?(ctx.parsed/tot*100).toFixed(1):'0.0')+'%)';
+        }}}
+      }
+    },
+    plugins:[shareLabelsPlugin]
+  });
+}
+function barOptions(){
+  return {
+    responsive:true, maintainAspectRatio:false,
+    plugins:{legend:{display:false}, tooltip:{callbacks:{label:(ctx)=>fmtMoney(ctx.parsed.y ?? ctx.parsed.x)}}},
+    scales:{
+      x:{grid:{display:false}, ticks:{color:getSoftColor(), font:{family:'IBM Plex Sans', size:11}}},
+      y:{grid:{color:getGridColor()}, ticks:{color:getSoftColor(), font:{family:'IBM Plex Mono', size:10}, callback:v=>fmtMoney(v)}}
+    }
+  };
+}
+
+/* ============================================================
+   ORDERS
+   ============================================================ */
+function orderNum(ref){
+  const m = String(ref||'').match(/^(\d+)/);
+  return m ? parseInt(m[1],10) : Number.MAX_SAFE_INTEGER;
+}
+let orderSortDir = 'asc';
+function sortByOrderNum(rows){
+  const dir = orderSortDir==='asc' ? 1 : -1;
+  return rows.sort((a,b)=> dir*(orderNum(a.ref)-orderNum(b.ref)));
+}
+function sortToggleBtn(){
+  return `<button class="btn btn-sm" id="btn-sort-order">Order # ${orderSortDir==='asc'?'<span class="sort-arrow">&#8593;</span>':'<span class="sort-arrow">&#8595;</span>'}</button>`;
+}
+
+let orderFilters = {q:'', channel:'', rep:'', status:'', month:'all'};
+
+const orderSelected = new Set();
+function renderOrders(page){
+  const tabs = allMonthTabs();
+  if(orderFilters.month !== 'all' && !tabs.includes(orderFilters.month)) orderFilters.month = 'all';
+  const all = computedOrders();
+  let rows = all.filter(o=>{
+    if(orderFilters.month !== 'all' && o.ledgerMonth !== orderFilters.month) return false;
+    if(orderFilters.channel && o.channel!==orderFilters.channel) return false;
+    if(orderFilters.rep && o.rep!==orderFilters.rep) return false;
+    if(orderFilters.status && o.status!==orderFilters.status) return false;
+    if(orderFilters.q){
+      const q = orderFilters.q.toLowerCase();
+      if(!o.ref.toLowerCase().includes(q)) return false;
+    }
+    return true;
+  });
+  rows = sortByOrderNum(rows);
+
+  const channelOpts = Object.keys(state.channels).map(c=>`<option value="${c}" ${orderFilters.channel===c?'selected':''}>${escapeHtml(chName(c))}</option>`).join('');
+  const repOpts = Object.keys(state.reps).map(c=>`<option value="${c}" ${orderFilters.rep===c?'selected':''}>${escapeHtml(repName(c))}</option>`).join('');
+
+  page.innerHTML = `
+    <div class="pagehead">
+      <div><h1>Sale Orders</h1><p>Core order entry, organized by month. Profit lives in the P&amp;L tab.</p></div>
+      <div class="actions">
+        <button class="btn" id="btn-template">Download template</button>
+        <button class="btn" id="btn-bulk">Bulk upload</button>
+        <input type="file" id="bulk-file-input" accept=".xlsx,.xls,.csv" style="display:none;">
+        <button class="btn btn-primary" id="btn-new-order">+ New order</button>
+      </div>
+    </div>
+    <div class="month-tabs" id="month-tabs">
+      <div class="month-tab ${orderFilters.month==='all'?'active':''}" data-month="all">All orders</div>
+      ${tabs.map(m=>`<div class="month-tab ${orderFilters.month===m?'active':''}" data-month="${m}">${escapeHtml(monthLabel(m))}</div>`).join('')}
+      <div class="month-tab-add" id="btn-add-month" title="Add a new month">+</div>
+    </div>
+    <div class="toolbar">
+      <input type="search" id="f-q" placeholder="Search order ref…" value="${escapeHtml(orderFilters.q)}">
+      <select id="f-channel"><option value="">All channels</option>${channelOpts}</select>
+      <select id="f-rep"><option value="">All salesmen</option>${repOpts}</select>
+      ${sortToggleBtn()}
+      ${orderFilters.month!=='all' ? `<button class="btn btn-sm btn-danger" id="btn-remove-month">Remove ${escapeHtml(monthLabel(orderFilters.month))}</button>` : ''}
+      <div class="spacer"></div>
+      <span class="muted" style="font-size:12px;">${rows.length} of ${all.length} orders</span>
+    </div>
+    <div id="ord-bar" class="bulk-bar" style="display:none;">
+      <span id="ord-bar-count"></span>
+      <button class="btn btn-sm btn-danger" id="ord-bar-delete">Delete selected</button>
+      <button class="btn btn-sm" id="ord-bar-clear">Clear</button>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr>
+          <th style="width:34px;"><input type="checkbox" id="ord-all" style="width:auto;" title="Select all in view"></th><th>Order ref</th><th>Channel</th><th>Salesman</th>
+          <th class="num">Gross sales</th><th class="num">GST%</th><th class="num">Total cost</th><th class="num">Markup %</th><th></th>
+        </tr></thead>
+        <tbody>
+        ${rows.map(o=>`
+          <tr data-id="${o.id}" style="cursor:pointer;">
+            <td class="sel-cell"><input type="checkbox" class="ord-sel" data-id="${o.id}" style="width:auto;" ${orderSelected.has(o.id)?'checked':''}></td>
+            <td class="ref">${escapeHtml(o.ref)}<div class="sub">${escapeHtml(monthLabel(o.ledgerMonth))}</div></td>
+            <td>${escapeHtml(chName(o.channel))}</td>
+            <td>${escapeHtml(repName(o.rep))}</td>
+            <td class="num">${fmtMoney(o.grossSales)}</td>
+            <td class="num">${o.gstRate}%</td>
+            <td class="num">${o.totalCost===null?'<span class="muted">pending</span>':fmtMoney(o.totalCost)}</td>
+            <td class="num">${(o.totalCost===null||!o.totalCost)?'<span class="muted">—</span>':(((o.grossSales-o.totalCost)/o.totalCost*100).toFixed(1)+'%')}</td>
+            <td><button class="icon-btn btn-del" data-id="${o.id}" title="Delete">✕</button></td>
+          </tr>`).join('') || `<tr><td colspan="9" class="empty">No orders in ${orderFilters.month==='all'?'the ledger':'this month'} yet. Use "+ New order" to add one.</td></tr>`}
+        </tbody>
+      </table>
+    </div>
+  `;
+
+  document.getElementById('btn-new-order').addEventListener('click', ()=>openOrderModal(null));
+  document.getElementById('btn-template').addEventListener('click', ()=>downloadTemplate());
+  document.getElementById('btn-bulk').addEventListener('click', ()=>document.getElementById('bulk-file-input').click());
+  document.getElementById('bulk-file-input').addEventListener('change', handleBulkFile);
+  document.getElementById('f-q').addEventListener('input', e=>{ orderFilters.q=e.target.value; renderOrders(page); const q=document.getElementById('f-q'); q.focus(); q.setSelectionRange(q.value.length,q.value.length); });
+  document.getElementById('f-channel').addEventListener('change', e=>{ orderFilters.channel=e.target.value; renderOrders(page); });
+  document.getElementById('f-rep').addEventListener('change', e=>{ orderFilters.rep=e.target.value; renderOrders(page); });
+  document.getElementById('btn-sort-order').addEventListener('click', ()=>{ orderSortDir = orderSortDir==='asc'?'desc':'asc'; renderOrders(page); });
+  page.querySelectorAll('.month-tab').forEach(t=>{
+    t.addEventListener('click', ()=>{ orderFilters.month = t.dataset.month; renderOrders(page); });
+  });
+  document.getElementById('btn-add-month').addEventListener('click', ()=>openAddMonthModal());
+  const removeBtn = document.getElementById('btn-remove-month');
+  if(removeBtn){
+    removeBtn.addEventListener('click', ()=>{
+      const month = orderFilters.month;
+      const count = state.orders.filter(o=>o.ledgerMonth===month).length;
+      const body = count
+        ? `This also permanently deletes the ${count} order${count!==1?'s':''} filed under it. This cannot be undone.`
+        : 'This month has no orders. The tab will be removed.';
+      showConfirm(`Remove ${monthLabel(month)}?`, body, async ()=>{
+        showToast('Removing ' + monthLabel(month) + '…');
+        await removeMonthTab(month);
+        orderFilters.month = 'all';
+        render();
+        showToast(monthLabel(month) + ' removed');
+      });
+    });
+  }
+  page.querySelectorAll('tbody tr[data-id]').forEach(tr=>{
+    tr.addEventListener('click', (e)=>{
+      if(e.target.closest('.btn-del') || e.target.closest('.sel-cell')) return;
+      openOrderModal(tr.dataset.id);
+    });
+  });
+  page.querySelectorAll('.btn-del').forEach(b=>{
+    b.addEventListener('click', (e)=>{
+      e.stopPropagation();
+      const id = b.dataset.id;
+      const ref = state.orders.find(o=>o.id===id)?.ref || 'this order';
+      showConfirm(`Delete order "${ref}"?`, 'This removes it permanently — it cannot be undone.', async ()=>{
+        await deleteOrderById(id);
+        showToast('Order deleted');
+      });
+    });
+  });
+  // multi-select + bulk delete
+  const rowIds = new Set(rows.map(o=>o.id));
+  [...orderSelected].forEach(id=>{ if(!rowIds.has(id)) orderSelected.delete(id); });
+  const ordBar = document.getElementById('ord-bar'), ordAll = document.getElementById('ord-all');
+  const refreshOrdBar = () => {
+    ordBar.style.display = orderSelected.size ? 'flex' : 'none';
+    document.getElementById('ord-bar-count').textContent = orderSelected.size + ' selected';
+    ordAll.checked = rows.length>0 && orderSelected.size===rows.length;
+    ordAll.indeterminate = orderSelected.size>0 && orderSelected.size<rows.length;
+  };
+  page.querySelectorAll('.ord-sel').forEach(cb=>{
+    cb.addEventListener('change', ()=>{ cb.checked ? orderSelected.add(cb.dataset.id) : orderSelected.delete(cb.dataset.id); refreshOrdBar(); });
+  });
+  ordAll.addEventListener('change', ()=>{
+    if(ordAll.checked) rows.forEach(o=>orderSelected.add(o.id)); else orderSelected.clear();
+    page.querySelectorAll('.ord-sel').forEach(cb=>{ cb.checked = orderSelected.has(cb.dataset.id); });
+    refreshOrdBar();
+  });
+  document.getElementById('ord-bar-clear').addEventListener('click', ()=>{
+    orderSelected.clear();
+    page.querySelectorAll('.ord-sel').forEach(cb=>{ cb.checked=false; });
+    refreshOrdBar();
+  });
+  document.getElementById('ord-bar-delete').addEventListener('click', ()=>{
+    const ids = [...orderSelected];
+    if(!ids.length) return;
+    showConfirm(`Delete ${ids.length} order${ids.length!==1?'s':''}?`, 'This removes them permanently — it cannot be undone.', async ()=>{
+      if(db){
+        for(let i=0;i<ids.length;i+=20){
+          await Promise.all(ids.slice(i,i+20).map(id=>fb.deleteDoc(docRef('orders/'+id))));
+        }
+      }else{
+        state.orders = state.orders.filter(o=>!orderSelected.has(o.id));
+      }
+      orderSelected.clear();
+      showToast('Deleted '+ids.length+' order'+(ids.length!==1?'s':''));
+      if(!db) render();
+    });
+  });
+  refreshOrdBar();
+}
+
+function openAddMonthModal(){
+  if(document.getElementById('new-month-input')) return; // already open
+  const overlay = document.createElement('div');
+  overlay.className = 'overlay';
+  overlay.style.alignItems = 'center';
+  const defaultVal = currentMonthKey();
+  overlay.innerHTML = `
+    <div class="modal" style="max-width:340px;">
+      <h2 style="font-size:17px;">Add a month</h2>
+      <div class="field"><label>Month</label><input type="month" id="new-month-input" value="${defaultVal}"></div>
+      <div class="modal-foot">
+        <button class="btn" id="am-cancel">Cancel</button>
+        <button class="btn btn-primary" id="am-ok">Add tab</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', e=>{ if(e.target===overlay) overlay.remove(); });
+  overlay.querySelector('#am-cancel').addEventListener('click', ()=>overlay.remove());
+  overlay.querySelector('#am-ok').addEventListener('click', async ()=>{
+    const v = overlay.querySelector('#new-month-input').value;
+    if(!v) return;
+    await addMonthTab(v);
+    orderFilters.month = v;
+    overlay.remove();
+    render();
+    showToast('Month added');
+  });
+}
+
+/* ============================================================
+   BULK UPLOAD / TEMPLATE
+   ============================================================ */
+function excelSerialToDate(serial){
+  const utc_days = Math.floor(serial - 25569);
+  const utc_value = utc_days * 86400;
+  return new Date(utc_value * 1000);
+}
+function toISODate(v){
+  // v is a raw Excel serial number for real date cells (cellDates is intentionally
+  // NOT used on read — SheetJS's Date-object conversion applies the browser's local
+  // timezone plus floating-point rounding, which can shift a date across midnight,
+  // e.g. reading April 1 back as March 31 for a viewer in IST). Pure day-count
+  // arithmetic here is timezone-independent.
+  if(typeof v === 'number' && isFinite(v)) return excelSerialToDate(v).toISOString().slice(0,10);
+  if(v instanceof Date && !isNaN(v)){
+    const y=v.getUTCFullYear(), m=v.getUTCMonth()+1, d=v.getUTCDate();
+    return `${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+  }
+  const s = String(v||'').trim();
+  if(!s) return '';
+  let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if(m) return `${m[1]}-${String(m[2]).padStart(2,'0')}-${String(m[3]).padStart(2,'0')}`;
+  m = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+  if(m) return `${m[3]}-${String(m[2]).padStart(2,'0')}-${String(m[1]).padStart(2,'0')}`;
+  const d = new Date(s);
+  if(!isNaN(d)) return d.toISOString().slice(0,10);
+  return '';
+}
+const MONTH_ABBR = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'];
+/* Reads a Month cell: YYYY-MM, an Excel date (Excel turns a typed 2026-04 into a
+   date), a bare month number 1-12, or a month name ("Apr", "April 2026").
+   A month with no year is read as that month of the current financial year
+   (Apr-Mar) and flagged so the upload preview can say so. */
+function parseMonthCell(v){
+  const blank = {key:'', assumed:false, blank:true};
+  if(v===''||v===null||v===undefined) return blank;
+  const pad = n => String(n).padStart(2,'0');
+  const fyStart = fyStartYear(currentMonthKey());
+  const assumeYear = m => ({key:(m>=4 ? fyStart : fyStart+1) + '-' + pad(m), assumed:true});
+  const bad = {key:'', assumed:false};
+  if(typeof v === 'number' && isFinite(v)){
+    if(Number.isInteger(v) && v>=1 && v<=12) return assumeYear(v);
+    if(v<20000) return bad; // not a month number and too small to be a real date serial
+    const iso = toISODate(v);
+    return iso ? {key:iso.slice(0,7), assumed:false} : bad;
+  }
+  if(v instanceof Date && !isNaN(v)){
+    const iso = toISODate(v);
+    return iso ? {key:iso.slice(0,7), assumed:false} : bad;
+  }
+  const s = String(v).trim();
+  if(!s) return blank;
+  let m = s.match(/^(\d{4})[-\/](\d{1,2})$/);
+  if(m) return (+m[2]>=1 && +m[2]<=12) ? {key:m[1]+'-'+pad(m[2]), assumed:false} : bad;
+  m = s.match(/^(\d{1,2})$/);
+  if(m) return (+m[1]>=1 && +m[1]<=12) ? assumeYear(+m[1]) : bad;
+  m = s.match(/^([A-Za-z]{3,9})\.?[\s\-\/,]*(\d{2}|\d{4})?$/);
+  if(m){
+    const idx = MONTH_ABBR.indexOf(m[1].slice(0,3).toLowerCase());
+    if(idx>=0){
+      if(m[2]){ const y = m[2].length===2 ? 2000+(+m[2]) : +m[2]; return {key:y+'-'+pad(idx+1), assumed:false}; }
+      return assumeYear(idx+1);
+    }
+  }
+  const iso = toISODate(s);
+  return iso ? {key:iso.slice(0,7), assumed:false} : bad;
+}
+function normHeader(h){ return String(h||'').toLowerCase().replace(/[^a-z0-9]/g,''); }
+function resolveField(n){
+  if(n.includes('orderref')) return 'ref';
+  if(n.includes('channel')) return 'channel';
+  if(n.includes('salesman')||n.includes('salesperson')||n==='rep') return 'rep';
+  if(n.includes('belongstomonth')||(n.includes('month')&&!n.includes('date'))) return 'ledgerMonth';
+  if(n.includes('orderdate')||n==='date') return 'date';
+  if(n.includes('grosssales')) return 'grossSales';
+  if(n.includes('totalcost')) return 'totalCost';
+  if(n.includes('gst')) return 'gstRate';
+  if(n.includes('notes')) return 'notes';
+  return null;
+}
+function resolveCode(value, dict){
+  const v = String(value).trim();
+  const codeMatch = Object.keys(dict).find(c=>c.toLowerCase()===v.toLowerCase());
+  if(codeMatch) return codeMatch;
+  const nameMatch = Object.keys(dict).find(c=>String(dict[c]).toLowerCase()===v.toLowerCase());
+  if(nameMatch) return nameMatch;
+  return v;
+}
+const TEMPLATE_EXAMPLE_REF = '200-IM-1509-26-A-Example Client';
+
+function parseWorkbookRows(wb){
+  const sheetName = wb.SheetNames.find(n=>n.toLowerCase().includes('sale order')) || wb.SheetNames[0];
+  const sheet = wb.Sheets[sheetName];
+  const aoa = XLSX.utils.sheet_to_json(sheet, {header:1, defval:'', raw:true, blankrows:false});
+  const valid=[], errors=[], newChannels=new Set(), newReps=new Set(), newMonths=new Set();
+  const monthCounts = {};
+  let assumedCount = 0;
+  const assumedFY = fyLabel(fyStartYear(currentMonthKey()));
+  if(!aoa.length) return {valid, errors:[{row:0, ref:'', reason:'Sheet is empty'}], newChannels, newReps, newMonths, monthCounts, assumedCount, assumedFY};
+
+  const colMap = {};
+  aoa[0].forEach((h,idx)=>{ const f = resolveField(normHeader(h)); if(f && colMap[f]===undefined) colMap[f]=idx; });
+  const existingTabs = allMonthTabs();
+
+  for(let r=1;r<aoa.length;r++){
+    const row = aoa[r];
+    const get = f => colMap[f]!==undefined ? row[colMap[f]] : '';
+    const ref = String(get('ref')||'').trim();
+    if(!ref) continue;
+    if(ref === TEMPLATE_EXAMPLE_REF) continue;
+
+    const channelRaw = String(get('channel')||'').trim();
+    const repRaw = String(get('rep')||'').trim();
+    const grossRaw = get('grossSales');
+    const dateRaw = get('date');
+    const monthRaw = get('ledgerMonth');
+    const gstRaw = get('gstRate');
+    const costRaw = get('totalCost');
+    const notes = String(get('notes')||'').trim();
+
+    const rowErrors = [];
+    if(!channelRaw) rowErrors.push('missing Channel');
+    if(!repRaw) rowErrors.push('missing Salesman');
+    const grossSales = parseFloat(grossRaw);
+    if(grossRaw==='' || isNaN(grossSales)) rowErrors.push('missing/invalid Gross Sales');
+    // Month is the required field. Files from the older template (with an Order Date
+    // column) still work: a blank Month falls back to the date's month.
+    const monthParsed = parseMonthCell(monthRaw);
+    let ledgerMonth = monthParsed.key;
+    if(!ledgerMonth && monthParsed.blank){
+      const iso = toISODate(dateRaw);
+      if(iso) ledgerMonth = iso.slice(0,7);
+    }
+    if(!ledgerMonth) rowErrors.push(monthParsed.blank ? 'missing Month' : 'invalid Month');
+
+    if(rowErrors.length){ errors.push({row:r+1, ref, reason:rowErrors.join(', ')}); continue; }
+
+    if(monthParsed.assumed) assumedCount++;
+    monthCounts[ledgerMonth] = (monthCounts[ledgerMonth]||0) + 1;
+    const gstRate = (gstRaw===''||gstRaw===null||isNaN(parseFloat(gstRaw))) ? 0 : parseFloat(gstRaw);
+    const totalCost = (costRaw===''||costRaw===null||costRaw===undefined||isNaN(parseFloat(costRaw))) ? null : parseFloat(costRaw);
+    const channelCode = resolveCode(channelRaw, state.channels);
+    const repCode = resolveCode(repRaw, state.reps);
+    if(!state.channels[channelCode]) newChannels.add(channelCode);
+    if(!state.reps[repCode]) newReps.add(repCode);
+    if(!existingTabs.includes(ledgerMonth) && !newMonths.has(ledgerMonth)) newMonths.add(ledgerMonth);
+
+    valid.push({ref, channel:channelCode, rep:repCode, ledgerMonth, gstRate, grossSales, totalCost, paymentStatus:'none', notes});
+  }
+  return {valid, errors, newChannels, newReps, newMonths, monthCounts, assumedCount, assumedFY};
+}
+
+async function handleBulkFile(e){
+  const file = e.target.files[0];
+  e.target.value = '';
+  if(!file) return;
+  try{
+    const buf = await file.arrayBuffer();
+    const wb = XLSX.read(buf, {type:'array'});
+    const parsed = parseWorkbookRows(wb);
+    openBulkPreviewModal(parsed);
+  }catch(err){
+    console.error(err);
+    showToast('Could not read that file — check it matches the template format');
+  }
+}
+
+function openBulkPreviewModal(parsed){
+  closeAllOverlays();
+  const overlay = document.createElement('div');
+  overlay.className = 'overlay';
+  const newCh = [...parsed.newChannels], newRp = [...parsed.newReps], newMo = [...parsed.newMonths];
+  overlay.innerHTML = `
+    <div class="modal" style="max-width:540px;">
+      <h2>Bulk upload preview</h2>
+      <p style="color:var(--ink-soft);font-size:13px;margin:0 0 14px;">${parsed.valid.length} order${parsed.valid.length!==1?'s':''} ready to import${parsed.errors.length?`, ${parsed.errors.length} row${parsed.errors.length!==1?'s':''} skipped`:''}.</p>
+      ${Object.keys(parsed.monthCounts).length ? `<div style="font-size:13px;margin:0 0 14px;">
+        <div style="color:var(--ink-soft);margin-bottom:6px;">Orders will be filed under:</div>
+        ${Object.keys(parsed.monthCounts).sort().map(k=>`<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--border);"><span>${escapeHtml(monthLabel(k))}</span><span class="num">${parsed.monthCounts[k]}</span></div>`).join('')}
+      </div>` : ''}
+      ${(newCh.length||newRp.length||newMo.length||parsed.assumedCount) ? `<div class="section-note">
+        ${newCh.length?`New channel${newCh.length>1?'s':''}: ${newCh.map(escapeHtml).join(', ')}<br>`:''}
+        ${newRp.length?`New salesm${newRp.length>1?'en':'an'}: ${newRp.map(escapeHtml).join(', ')}<br>`:''}
+        ${newMo.length?`New month tab${newMo.length>1?'s':''}: ${newMo.map(monthLabel).map(escapeHtml).join(', ')}<br>`:''}
+        ${parsed.assumedCount?`${parsed.assumedCount} row${parsed.assumedCount!==1?'s':''} gave a month without a year and ${parsed.assumedCount!==1?'were':'was'} placed in ${escapeHtml(parsed.assumedFY)} (April to March). Check the months above, or use YYYY-MM.`:''}
+      </div>` : ''}
+      ${parsed.errors.length? `<div style="max-height:160px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 12px;margin-bottom:14px;font-size:12px;color:var(--negative);">
+        ${parsed.errors.slice(0,20).map(e=>`Row ${e.row}${e.ref?` ("${escapeHtml(e.ref)}")`:''}: ${escapeHtml(e.reason)}`).join('<br>')}
+        ${parsed.errors.length>20?`<br>…and ${parsed.errors.length-20} more`:''}
+      </div>` : ''}
+      <div class="modal-foot">
+        <button class="btn" id="bulk-cancel">Cancel</button>
+        <button class="btn btn-primary" id="bulk-confirm" ${parsed.valid.length===0?'disabled':''}>Import ${parsed.valid.length} order${parsed.valid.length!==1?'s':''}</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', e=>{ if(e.target===overlay) overlay.remove(); });
+  overlay.querySelector('#bulk-cancel').addEventListener('click', ()=>overlay.remove());
+  overlay.querySelector('#bulk-confirm').addEventListener('click', async ()=>{
+    const btn = overlay.querySelector('#bulk-confirm');
+    btn.textContent = 'Importing…'; btn.disabled = true;
+    await performBulkImport(parsed);
+    overlay.remove();
+  });
+}
+
+async function performBulkImport(parsed){
+  for(const code of parsed.newChannels){ await saveChannelName(code, code); }
+  for(const code of parsed.newReps){ await saveRepName(code, code); }
+  for(const month of parsed.newMonths){ await addMonthTab(month); }
+  for(const row of parsed.valid){ await saveOrder(row); }
+  showToast(`Imported ${parsed.valid.length} order${parsed.valid.length!==1?'s':''}`);
+  render();
+}
+
+function buildTemplateWorkbook(){
+  const headers = ['Order Ref*','Channel*','Salesman*','Month* (YYYY-MM or 1-12)','GST % (optional, blank = 0)','Gross Sales incl. GST*','Total Cost incl. GST (optional)','Notes (optional)'];
+  const example = [TEMPLATE_EXAMPLE_REF,'IM','A','2026-09',18,125000,98000,'Sample row — delete before uploading'];
+  const ws = XLSX.utils.aoa_to_sheet([headers, example]);
+  ws['!cols'] = [{wch:30},{wch:12},{wch:12},{wch:24},{wch:14},{wch:18},{wch:20},{wch:24}];
+  const chCodes = Object.keys(state.channels), rpCodes = Object.keys(state.reps);
+  const refAoa = [['Channel code','Channel name','','Salesman code','Salesman name']];
+  for(let i=0;i<Math.max(chCodes.length,rpCodes.length);i++){
+    refAoa.push([chCodes[i]||'', chCodes[i]?state.channels[chCodes[i]]:'', '', rpCodes[i]||'', rpCodes[i]?state.reps[rpCodes[i]]:'']);
+  }
+  const refWs = XLSX.utils.aoa_to_sheet(refAoa);
+  refWs['!cols'] = [{wch:14},{wch:16},{wch:2},{wch:14},{wch:16}];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Sale Orders');
+  XLSX.utils.book_append_sheet(wb, refWs, 'Reference');
+  return wb;
+}
+async function downloadTemplate(){
+  const wb = buildTemplateWorkbook();
+  const arr = XLSX.write(wb, {bookType:'xlsx', type:'array'});
+  const blob = new Blob([arr], {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+  downloadBlob(blob, 'Alfa-Enterprises-Sale-Orders-Template.xlsx');
+  showToast('Template ready');
+}
+function downloadBlob(blob, filename){
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url), 1000);
+}
+
+function openOrderModal(id){
+  closeAllOverlays();
+  editingOrderId = id;
+  const defaultMonth = (orderFilters.month && orderFilters.month!=='all') ? orderFilters.month : currentMonthKey();
+  const o = id ? computeOrder(state.orders.find(x=>x.id===id)) : {ref:'',channel:Object.keys(state.channels)[0]||'',rep:Object.keys(state.reps)[0]||'',ledgerMonth:defaultMonth,pnf:0,gstRate:18,totalCost:'',recovery:0,notes:''};
+
+  const channelOpts = Object.keys(state.channels).map(c=>`<option value="${c}" ${o.channel===c?'selected':''}>${escapeHtml(chName(c))}</option>`).join('');
+  const repOpts = Object.keys(state.reps).map(c=>`<option value="${c}" ${o.rep===c?'selected':''}>${escapeHtml(repName(c))}</option>`).join('');
+  const monthOpts = allMonthTabs().map(m=>`<option value="${m}" ${o.ledgerMonth===m?'selected':''}>${escapeHtml(monthLabel(m))}</option>`).join('');
+
+  const overlay = document.createElement('div');
+  overlay.className = 'overlay';
+  overlay.innerHTML = `
+    <div class="modal">
+      <h2>${id?'Edit order':'New sale order'}</h2>
+      <form id="order-form">
+        <div class="field"><label>Order reference</label><input required name="ref" value="${escapeAttr(o.ref)}" placeholder="e.g. 200-IM-1509-26-A-Client Name"></div>
+        <div class="field-row">
+          <div class="field"><label>Channel</label><select name="channel">${channelOpts}</select></div>
+          <div class="field"><label>Salesman</label><select name="rep">${repOpts}</select></div>
+        </div>
+        <div class="field-row">
+          <div class="field"><label>Month</label>
+            <select name="ledgerMonth">${monthOpts}<option value="__new__">+ Add new month…</option></select>
+          </div>
+          <div class="field"><label>GST %</label>
+            <select name="gstRate">
+              ${[0,5,12,18,28].map(r=>`<option value="${r}" ${Number(o.gstRate)===r?'selected':''}>${r}%</option>`).join('')}
+            </select>
+          </div>
+        </div>
+        <div class="field-row">
+          <div class="field"><label>Gross sales (incl. GST)</label><input required type="number" step="any" name="grossSales" value="${o.grossSales===''||o.grossSales===undefined?'':round2(o.grossSales)}"></div>
+          <div class="field"><label>Total cost (incl. GST)</label><input type="number" step="any" name="totalCost" value="${o.totalCost===null||o.totalCost===undefined?'':round2(o.totalCost)}" placeholder="blank if not final"></div>
+        </div>
+        <div class="hint" id="live-calc"></div>
+        <div class="field" style="margin-top:14px;"><label>Notes</label><textarea name="notes" rows="2" placeholder="optional">${escapeHtml(o.notes||'')}</textarea></div>
+      </form>
+      <div class="modal-foot">
+        <button class="btn" id="btn-cancel">Cancel</button>
+        <button class="btn btn-primary" id="btn-save">${id?'Save changes':'Add order'}</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+
+  const monthSelect = overlay.querySelector('select[name="ledgerMonth"]');
+  monthSelect.addEventListener('change', ()=>{
+    if(monthSelect.value === '__new__'){
+      openAddMonthModal();
+      monthSelect.value = defaultMonth; // revert; re-open this order to pick the newly created month
+    }
+  });
+
+  function updateLiveCalc(){
+    const fd = new FormData(overlay.querySelector('#order-form'));
+    const preview = computeOrder({
+      grossSales:parseFloat(fd.get('grossSales'))||0,
+      gstRate:parseFloat(fd.get('gstRate'))||0,
+      totalCost: fd.get('totalCost')==='' ? null : parseFloat(fd.get('totalCost')),
+      paymentStatus: o.status || 'none',
+    });
+    let msg = '';
+    if(preview.netProfit===null) msg = 'Enter total cost to compute gross &amp; net profit — this will show in the P&L tab.';
+    else msg = `Gross profit ${fmtMoney2(preview.grossProfit)} · net profit ${fmtMoney2(preview.netProfit)}.`;
+    overlay.querySelector('#live-calc').innerHTML = msg;
+  }
+  overlay.querySelectorAll('input,select').forEach(el=>el.addEventListener('input', updateLiveCalc));
+  updateLiveCalc();
+
+  overlay.addEventListener('click', e=>{ if(e.target===overlay) overlay.remove(); });
+  overlay.querySelector('#btn-cancel').addEventListener('click', ()=>overlay.remove());
+  overlay.querySelector('#btn-save').addEventListener('click', async (e)=>{
+    e.preventDefault();
+    const form = overlay.querySelector('#order-form');
+    if(!form.reportValidity()) return;
+    const fd = new FormData(form);
+    const payload = {
+      id: id || undefined,
+      ref: fd.get('ref').trim(),
+      channel: fd.get('channel'),
+      rep: fd.get('rep'),
+      ledgerMonth: fd.get('ledgerMonth')==='__new__' ? defaultMonth : fd.get('ledgerMonth'),
+      gstRate: parseFloat(fd.get('gstRate'))||0,
+      grossSales: parseFloat(fd.get('grossSales'))||0,
+      totalCost: fd.get('totalCost')==='' ? null : parseFloat(fd.get('totalCost')),
+      paymentStatus: o.status || 'none',
+      incentiveMonth: o.incentiveMonth || null,
+      incentiveLocked: o.incentiveLocked ?? null,
+      notes: fd.get('notes')||'',
+    };
+    await saveOrder(payload);
+    overlay.remove();
+    showToast(id?'Order updated':'Order added');
+  });
+}
+
+/* ============================================================
+   P&L
+   ============================================================ */
+function renderPnl(page){
+  const tabs = allMonthTabs();
+  if(orderFilters.month !== 'all' && !tabs.includes(orderFilters.month)) orderFilters.month = 'all';
+  const all = computedOrders();
+  let rows = all.filter(o=>{
+    if(orderFilters.month !== 'all' && o.ledgerMonth !== orderFilters.month) return false;
+    if(orderFilters.channel && o.channel!==orderFilters.channel) return false;
+    if(orderFilters.rep && o.rep!==orderFilters.rep) return false;
+    if(orderFilters.q){
+      const q = orderFilters.q.toLowerCase();
+      if(!o.ref.toLowerCase().includes(q)) return false;
+    }
+    return true;
+  });
+  rows = sortByOrderNum(rows);
+  const pTotGross = round2(rows.reduce((t,o)=>t+o.grossSales,0));
+  const pTotCost = round2(rows.reduce((t,o)=>t+(o.totalCost||0),0));
+  const pTotGP = round2(rows.reduce((t,o)=>t+(o.grossProfit||0),0));
+  const pTotNP = round2(rows.reduce((t,o)=>t+(o.netProfit||0),0));
+
+  const channelOpts = Object.keys(state.channels).map(c=>`<option value="${c}" ${orderFilters.channel===c?'selected':''}>${escapeHtml(chName(c))}</option>`).join('');
+  const repOpts = Object.keys(state.reps).map(c=>`<option value="${c}" ${orderFilters.rep===c?'selected':''}>${escapeHtml(repName(c))}</option>`).join('');
+
+  page.innerHTML = `
+    <div class="pagehead">
+      <div><h1>P&amp;L</h1><p>Gross and net profit per order, organized by month.</p></div>
+    </div>
+    <div class="month-tabs" id="month-tabs">
+      <div class="month-tab ${orderFilters.month==='all'?'active':''}" data-month="all">All orders</div>
+      ${tabs.map(m=>`<div class="month-tab ${orderFilters.month===m?'active':''}" data-month="${m}">${escapeHtml(monthLabel(m))}</div>`).join('')}
+    </div>
+    <div class="toolbar">
+      <input type="search" id="f-q" placeholder="Search order ref…" value="${escapeHtml(orderFilters.q)}">
+      <select id="f-channel"><option value="">All channels</option>${channelOpts}</select>
+      <select id="f-rep"><option value="">All salesmen</option>${repOpts}</select>
+      ${sortToggleBtn()}
+      <div class="spacer"></div>
+      <span class="muted" style="font-size:12px;">${rows.length} of ${all.length} orders</span>
+    </div>
+    <div class="kpi-row" style="grid-template-columns:repeat(3,1fr);">
+      <div class="kpi"><div class="label">Gross sales</div><div class="value num">${fmtMoney(pTotGross)}</div><div class="sub">${rows.length} orders in view</div></div>
+      <div class="kpi"><div class="label">Gross profit</div><div class="value num ${pTotGP>=0?'pos':'neg'}">${fmtMoney(pTotGP)}</div></div>
+      <div class="kpi hero"><div class="label">Net profit</div><div class="value num ${pTotNP>=0?'pos':'neg'}">${fmtMoney(pTotNP)}</div></div>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr>
+          <th>Order ref</th><th>Channel</th><th>Salesman</th>
+          <th class="num">Gross sales</th><th class="num">GST%</th><th class="num">Total cost</th>
+          <th class="num">Gross profit</th><th class="num">Net profit</th>
+        </tr></thead>
+        <tbody>
+        ${rows.map(o=>`
+          <tr data-id="${o.id}">
+            <td class="ref">${escapeHtml(o.ref)}<div class="sub">${escapeHtml(monthLabel(o.ledgerMonth))}</div></td>
+            <td>${escapeHtml(chName(o.channel))}</td>
+            <td>${escapeHtml(repName(o.rep))}</td>
+            <td class="num">${fmtMoney(o.grossSales)}</td>
+            <td class="num">${o.gstRate}%</td>
+            <td class="num">${o.totalCost===null?'<span class="muted">pending</span>':fmtMoney(o.totalCost)}</td>
+            <td class="num">${o.grossProfit===null?'—':fmtMoney(o.grossProfit)}</td>
+            <td class="num">${o.netProfit===null?'—':fmtMoney(o.netProfit)}</td>
+          </tr>`).join('') || `<tr><td colspan="8" class="empty">No orders in ${orderFilters.month==='all'?'the ledger':'this month'} yet — add them from the Sale Orders tab first.</td></tr>`}
+        </tbody>
+        ${rows.length ? `<tfoot><tr class="tot-row">
+          <td colspan="3">Total · ${rows.length} order${rows.length!==1?'s':''}</td>
+          <td class="num">${fmtMoney(pTotGross)}</td><td></td>
+          <td class="num">${fmtMoney(pTotCost)}</td>
+          <td class="num">${fmtMoney(pTotGP)}</td>
+          <td class="num">${fmtMoney(pTotNP)}</td>
+        </tr></tfoot>` : ''}
+      </table>
+    </div>
+  `;
+
+  document.getElementById('f-q').addEventListener('input', e=>{ orderFilters.q=e.target.value; renderPnl(page); const q=document.getElementById('f-q'); q.focus(); q.setSelectionRange(q.value.length,q.value.length); });
+  document.getElementById('f-channel').addEventListener('change', e=>{ orderFilters.channel=e.target.value; renderPnl(page); });
+  document.getElementById('f-rep').addEventListener('change', e=>{ orderFilters.rep=e.target.value; renderPnl(page); });
+  document.getElementById('btn-sort-order').addEventListener('click', ()=>{ orderSortDir = orderSortDir==='asc'?'desc':'asc'; renderPnl(page); });
+  page.querySelectorAll('.month-tab').forEach(t=>{
+    t.addEventListener('click', ()=>{ orderFilters.month = t.dataset.month; renderPnl(page); });
+  });
+}
+
+/* ============================================================
+   CHANNEL SUMMARY
+   ============================================================ */
+let channelFY = 'all';
+let channelMonth = 'all';
+function renderChannels(page){
+  const fys = availableFYs();
+  const monthsForFY = channelFY==='all' ? allMonthTabs() : monthsInFY(parseInt(channelFY,10));
+  if(channelMonth!=='all' && !monthsForFY.includes(channelMonth)) channelMonth = 'all';
+
+  const orders = computedOrders().filter(o=>{
+    if(!o.ledgerMonth) return false;
+    if(channelFY!=='all' && fyStartYear(o.ledgerMonth)!==parseInt(channelFY,10)) return false;
+    if(channelMonth!=='all' && o.ledgerMonth!==channelMonth) return false;
+    return true;
+  });
+  const groups = {};
+  orders.forEach(o=>{
+    const k = o.channel;
+    if(!groups[k]) groups[k] = {channel:k, count:0, gross:0, net:0, netKnown:0, pending:0, incentive:0};
+    const g = groups[k];
+    g.count++;
+    g.gross += o.grossSales;
+    if(o.netProfit!==null){ g.net += o.netProfit; g.netKnown++; }
+    if(o.status!=='full') g.pending += o.grossSales;
+    g.incentive += o.incentive;
+  });
+  const rows = Object.values(groups).sort((a,b)=>b.gross-a.gross);
+  const totalGross = rows.reduce((s,r)=>s+r.gross,0);
+
+  page.innerHTML = `
+    <div class="pagehead"><div><h1>Channel Summary</h1><p>Sales and profitability rolled up by sales channel.</p></div></div>
+    <div class="toolbar">
+      <select id="f-fy"><option value="all">All years</option>${fys.map(y=>`<option value="${y}" ${channelFY==String(y)?'selected':''}>${fyLabel(y)}</option>`).join('')}</select>
+      <select id="f-month"><option value="all">All months</option>${monthsForFY.map(m=>`<option value="${m}" ${channelMonth===m?'selected':''}>${escapeHtml(monthLabel(m))}</option>`).join('')}</select>
+      <div class="spacer"></div>
+      <span class="muted" style="font-size:12px;">${orders.length} orders in view</span>
+    </div>
+    <div class="chart-row">
+      <div class="panel"><h3 class="share-title">Sales - channel wise</h3><div class="panel-chart tall"><canvas id="chChannelShare"></canvas></div></div>
+      <div class="panel"><h3 class="share-title">Profit - channel wise</h3><div class="panel-chart tall"><canvas id="chChannelProfit"></canvas></div></div>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Channel</th><th class="num">Orders</th><th class="num">Gross sales</th><th class="num">% of total</th><th class="num">Net profit</th></tr></thead>
+        <tbody>
+        ${rows.map(r=>`
+          <tr>
+            <td>${escapeHtml(chName(r.channel))}</td>
+            <td class="num">${r.count}</td>
+            <td class="num">${fmtMoney(r.gross)}</td>
+            <td class="num">${totalGross?((r.gross/totalGross)*100).toFixed(1):'0.0'}%</td>
+            <td class="num">${r.netKnown? fmtMoney(round2(r.net)) : '—'}</td>
+          </tr>`).join('') || `<tr><td colspan="5" class="empty">No orders in this period.</td></tr>`}
+        </tbody>
+      </table>
+    </div>
+  `;
+  document.getElementById('f-fy').addEventListener('change', e=>{ channelFY=e.target.value; channelMonth='all'; renderChannels(page); });
+  document.getElementById('f-month').addEventListener('change', e=>{ channelMonth=e.target.value; renderChannels(page); });
+  charts.channelShare = shareChart('chChannelShare', rows.map(r=>chName(r.channel)), rows.map(r=>r.gross), false);
+  charts.channelProfit = shareChart('chChannelProfit', rows.map(r=>chName(r.channel)), rows.map(r=>r.net), true);
+}
+
+/* ============================================================
+   SALESMAN SUMMARY
+   ============================================================ */
+let salesmenFY = 'all';
+let salesmenMonth = 'all';
+function renderSalesmen(page){
+  const fys = availableFYs();
+  const monthsForFY = salesmenFY==='all' ? allMonthTabs() : monthsInFY(parseInt(salesmenFY,10));
+  if(salesmenMonth!=='all' && !monthsForFY.includes(salesmenMonth)) salesmenMonth = 'all';
+
+  const orders = computedOrders().filter(o=>{
+    if(!o.ledgerMonth) return false;
+    if(salesmenFY!=='all' && fyStartYear(o.ledgerMonth)!==parseInt(salesmenFY,10)) return false;
+    if(salesmenMonth!=='all' && o.ledgerMonth!==salesmenMonth) return false;
+    return true;
+  });
+  const groups = {};
+  orders.forEach(o=>{
+    const k = o.rep;
+    if(!groups[k]) groups[k] = {rep:k, count:0, gross:0, net:0, paid:0, incentive:0, pending:0};
+    const g = groups[k];
+    g.count++;
+    g.gross += o.grossSales;
+    if(o.netProfit!==null) g.net += o.netProfit;
+    if(o.status==='full') g.paid++;
+    g.incentive += o.incentive;
+    if(o.status!=='full') g.pending += o.grossSales;
+  });
+  const rows = Object.values(groups).sort((a,b)=>b.gross-a.gross);
+
+  page.innerHTML = `
+    <div class="pagehead"><div><h1>Salesman Summary</h1><p>Sales and profit contribution by sales executive.</p></div></div>
+    <div class="toolbar">
+      <select id="f-fy"><option value="all">All years</option>${fys.map(y=>`<option value="${y}" ${salesmenFY==String(y)?'selected':''}>${fyLabel(y)}</option>`).join('')}</select>
+      <select id="f-month"><option value="all">All months</option>${monthsForFY.map(m=>`<option value="${m}" ${salesmenMonth===m?'selected':''}>${escapeHtml(monthLabel(m))}</option>`).join('')}</select>
+      <div class="spacer"></div>
+      <span class="muted" style="font-size:12px;">${orders.length} orders in view</span>
+    </div>
+    <div class="chart-row">
+      <div class="panel"><h3 class="share-title">Sales - salesman wise</h3><div class="panel-chart tall"><canvas id="chRepBar"></canvas></div></div>
+      <div class="panel"><h3 class="share-title">Profit - salesman wise</h3><div class="panel-chart tall"><canvas id="chRepProfit"></canvas></div></div>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Salesman</th><th class="num">Orders</th><th class="num">Gross sales</th><th class="num">Net profit</th></tr></thead>
+        <tbody>
+        ${rows.map(r=>`
+          <tr>
+            <td>${escapeHtml(repName(r.rep))}</td>
+            <td class="num">${r.count}</td>
+            <td class="num">${fmtMoney(r.gross)}</td>
+            <td class="num">${fmtMoney(round2(r.net))}</td>
+          </tr>`).join('') || `<tr><td colspan="4" class="empty">No orders in this period.</td></tr>`}
+        </tbody>
+      </table>
+    </div>
+  `;
+  document.getElementById('f-fy').addEventListener('change', e=>{ salesmenFY=e.target.value; salesmenMonth='all'; renderSalesmen(page); });
+  document.getElementById('f-month').addEventListener('change', e=>{ salesmenMonth=e.target.value; renderSalesmen(page); });
+  charts.repBar = shareChart('chRepBar', rows.map(r=>repName(r.rep)), rows.map(r=>r.gross), false);
+  charts.repProfit = shareChart('chRepProfit', rows.map(r=>repName(r.rep)), rows.map(r=>r.net), true);
+}
+
+/* ============================================================
+   INCENTIVES
+   ============================================================ */
+let incentiveMonth = null;
+let incentiveRep = 'all';
+let incentiveChannel = '';
+const incSelected = new Set();
+function nextMonthKey(m){
+  const [y,mm] = m.split('-').map(Number);
+  return mm===12 ? (y+1)+'-01' : y+'-'+String(mm+1).padStart(2,'0');
+}
+function incentiveTabs(){
+  const set = new Set(allMonthTabs());
+  state.orders.forEach(o=>{ if(o.incentiveMonth) set.add(o.incentiveMonth); });
+  return [...set].sort();
+}
+function renderIncentives(page){
+  const tabs = incentiveTabs();
+  if(incentiveMonth === null) incentiveMonth = tabs.length ? tabs[tabs.length-1] : 'all';
+  if(incentiveMonth !== 'all' && !tabs.includes(incentiveMonth)) incentiveMonth = 'all';
+  const rate = state.settings.incentiveRate ?? 5;
+  const allOrders = computedOrders();
+  const eligibleOrders = allOrders.filter(o=>!isNonIncentiveRep(o.rep));
+  const monthOrders = incentiveMonth==='all' ? eligibleOrders : eligibleOrders.filter(o=>o.incMonth===incentiveMonth);
+
+  const repCodes = [...new Set(monthOrders.map(o=>o.rep))].sort((a,b)=>repName(a).localeCompare(repName(b)));
+  if(incentiveRep !== 'all' && !repCodes.includes(incentiveRep)) incentiveRep = 'all';
+  const repOrders = incentiveRep==='all' ? monthOrders : monthOrders.filter(o=>o.rep===incentiveRep);
+  const chCodes = [...new Set(repOrders.map(o=>o.channel))];
+  if(incentiveChannel && !chCodes.includes(incentiveChannel)) incentiveChannel = '';
+  const orders = (incentiveChannel ? repOrders.filter(o=>o.channel===incentiveChannel) : repOrders)
+    .slice().sort((a,b)=>orderNum(a.ref)-orderNum(b.ref));
+
+  const issued = orders.filter(o=>o.status==='full');
+  const grand = round2(issued.reduce((s,o)=>s+o.incentive,0));
+  const noCost = issued.filter(o=>o.netProfit===null);
+  const carriedIn = orders.filter(o=>o.incentiveMonth && o.incentiveMonth!==o.ledgerMonth).length;
+  const prevMonthKey = m => { const [y,mm]=m.split('-').map(Number); return mm===1 ? (y-1)+'-12' : y+'-'+String(mm-1).padStart(2,'0'); };
+  const isLocked = o => o.status==='full' && o.incentiveLocked!==false;
+  const statusSel = o => {
+    const locked = isLocked(o);
+    const isCarried = !!(o.incentiveMonth && o.incentiveMonth!==o.ledgerMonth);
+    const lockBtn = o.status==='full'
+      ? `<button class="icon-btn inc-lock ${locked?'locked':''}" data-id="${o.id}" title="${locked?'Locked — click to unlock':'Unlocked — click to lock'}">${locked
+          ? '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 018 0v4"/></svg>'
+          : '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 017.5-2"/></svg>'}</button>`
+      : '';
+    return `<div class="status-cell"><select class="inc-status" data-id="${o.id}" ${locked?'disabled':''}>
+      <option value="none" ${o.status!=='full' && o.status!=='noteligible'?'selected':''}>Pending</option>
+      <option value="full" ${o.status==='full'?'selected':''}>Payment received · issue incentive</option>
+      <option value="noteligible" ${o.status==='noteligible'?'selected':''}>Not eligible</option>
+      <option value="carry">Carry over to ${escapeHtml(monthLabel(nextMonthKey(o.incMonth||o.ledgerMonth)))}</option>
+      ${isCarried ? `<option value="back">Push back to ${escapeHtml(monthLabel(prevMonthKey(o.incMonth)))}</option>` : ''}
+    </select>${lockBtn}</div>`;
+  };
+  const totGross = round2(orders.reduce((t,o)=>t+o.grossSales,0));
+  const totNet = round2(orders.reduce((t,o)=>t+(o.netProfit||0),0));
+  const bulkable = orders.filter(o=>o.status!=='noteligible' && !isLocked(o));
+
+  page.innerHTML = `
+    <div class="pagehead">
+      <div><h1>Incentives</h1><p>${rate}% of net profit (owners excluded). Mark an order "Payment received" to issue its incentive in that month, or carry it over to the next month.</p></div>
+      <div class="actions"><button class="btn" id="btn-export">Export CSV</button></div>
+    </div>
+    <div class="month-tabs" id="month-tabs">
+      <div class="month-tab ${incentiveMonth==='all'?'active':''}" data-month="all">All months</div>
+      ${tabs.map(m=>`<div class="month-tab ${incentiveMonth===m?'active':''}" data-month="${m}">${escapeHtml(monthLabel(m))}</div>`).join('')}
+    </div>
+    <div class="month-tabs" id="rep-tabs">
+      <div class="month-tab ${incentiveRep==='all'?'active':''}" data-rep="all">All salesmen</div>
+      ${repCodes.map(r=>`<div class="month-tab ${incentiveRep===r?'active':''}" data-rep="${escapeAttr(r)}">${escapeHtml(repName(r))}</div>`).join('')}
+    </div>
+    <div class="toolbar">
+      <select id="f-inc-channel"><option value="">All channels</option>${chCodes.map(c=>`<option value="${escapeAttr(c)}" ${incentiveChannel===c?'selected':''}>${escapeHtml(chName(c))}</option>`).join('')}</select>
+      <div class="spacer"></div>
+      ${incentiveMonth!=='all' && bulkable.length ? `<button class="btn btn-sm btn-danger" id="btn-bulk-ne">Mark all ${bulkable.length} as not eligible</button>` : ''}
+      <span class="muted" style="font-size:12px;">${orders.length} order${orders.length!==1?'s':''} in view${carriedIn?` · ${carriedIn} carried over`:''}</span>
+    </div>
+    <div id="inc-bar" class="bulk-bar" style="display:none;">
+      <span id="inc-bar-count"></span>
+      <select id="inc-bar-action" style="width:auto;min-width:230px;">
+        <option value="none">Set to Pending</option>
+        <option value="full">Set to Payment received · issue incentive</option>
+        <option value="noteligible">Set to Not eligible</option>
+        <option value="carry">Carry over to next month</option>
+        <option value="back">Push back to previous month</option>
+      </select>
+      <button class="btn btn-primary btn-sm" id="inc-bar-apply">Apply to selected</button>
+      <button class="btn btn-sm" id="inc-bar-clear">Clear</button>
+    </div>
+    ${noCost.length? `<div class="section-note">${noCost.length} order${noCost.length>1?'s are':' is'} marked received but still missing a total cost, so incentive can't be computed. Add the cost in Sale Orders.</div>` : ''}
+    <div class="kpi-row" style="grid-template-columns:repeat(3,1fr);">
+      <div class="kpi hero"><div class="label">Incentive issued</div><div class="value num accent">${fmtMoney2(grand)}</div></div>
+      <div class="kpi"><div class="label">Orders issued</div><div class="value num">${issued.length}</div><div class="sub">of ${orders.length} in view</div></div>
+      <div class="kpi"><div class="label">Total net profit in view</div><div class="value num">${fmtMoney(totNet)}</div><div class="sub">gross sales ${fmtMoney(totGross)}</div></div>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th style="width:34px;"><input type="checkbox" id="inc-all" style="width:auto;" title="Select all in view"></th><th>Order ref</th><th>Salesman</th><th>Channel</th><th class="num">Gross sales</th><th class="num">Net profit</th><th class="num">Incentive (${rate}%)</th><th>Status</th></tr></thead>
+        <tbody>
+        ${orders.map(o=>`
+          <tr>
+            <td><input type="checkbox" class="inc-sel" data-id="${o.id}" style="width:auto;" ${incSelected.has(o.id)?'checked':''}></td>
+            <td class="ref">${escapeHtml(o.ref)}<div class="sub">${escapeHtml(monthLabel(o.ledgerMonth))}${o.incentiveMonth && o.incentiveMonth!==o.ledgerMonth?' · carried over':''}</div></td>
+            <td>${escapeHtml(repName(o.rep))}</td>
+            <td>${escapeHtml(chName(o.channel))}</td>
+            <td class="num">${fmtMoney(o.grossSales)}</td>
+            <td class="num">${o.netProfit===null?'—':fmtMoney(o.netProfit)}</td>
+            <td class="num" style="color:var(--accent-ink);font-weight:600;">${o.status==='full' ? (o.incentive>0?fmtMoney2(o.incentive):(o.incentiveNote||'—')) : '—'}</td>
+            <td>${statusSel(o)}</td>
+          </tr>`).join('') || `<tr><td colspan="8" class="empty">No orders for this selection.</td></tr>`}
+        </tbody>
+        ${orders.length ? `<tfoot><tr class="tot-row">
+          <td colspan="4">Total · ${orders.length} order${orders.length!==1?'s':''}</td>
+          <td class="num">${fmtMoney(totGross)}</td>
+          <td class="num">${fmtMoney(totNet)}</td>
+          <td class="num">${fmtMoney2(grand)}</td>
+          <td></td>
+        </tr></tfoot>` : ''}
+      </table>
+    </div>
+  `;
+
+  page.querySelectorAll('#month-tabs .month-tab').forEach(t=>{
+    t.addEventListener('click', ()=>{ incentiveMonth = t.dataset.month; renderIncentives(page); });
+  });
+  page.querySelectorAll('#rep-tabs .month-tab').forEach(t=>{
+    t.addEventListener('click', ()=>{ incentiveRep = t.dataset.rep; incentiveChannel=''; renderIncentives(page); });
+  });
+  document.getElementById('f-inc-channel').addEventListener('change', e=>{ incentiveChannel = e.target.value; renderIncentives(page); });
+  const patchFor = (o, value) => {
+    if(value==='back'){
+      if(!(o.incentiveMonth && o.incentiveMonth!==o.ledgerMonth)) return null;
+      const prev = prevMonthKey(o.incMonth);
+      return {incentiveMonth: prev===o.ledgerMonth ? null : prev, paymentStatus:'none', incentiveLocked:false};
+    }
+    if(value==='carry') return {incentiveMonth: nextMonthKey(o.incMonth||o.ledgerMonth), paymentStatus:'none', incentiveLocked:false};
+    if(value==='noteligible') return {paymentStatus:'noteligible', incentiveLocked:false};
+    if(value==='full') return {paymentStatus:'full', incentiveLocked:true};
+    return {paymentStatus:'none', incentiveLocked:false};
+  };
+  page.querySelectorAll('.inc-status').forEach(sel=>{
+    sel.addEventListener('change', async ()=>{
+      const o = allOrders.find(x=>x.id===sel.dataset.id);
+      if(!o) return;
+      if(isLocked(o)){ showToast('Locked — unlock first'); renderIncentives(page); return; }
+      const patch = patchFor(o, sel.value);
+      if(!patch){ renderIncentives(page); return; }
+      await updateOrderField(o.id, patch);
+      showToast(sel.value==='full' ? 'Incentive issued and locked' : sel.value==='carry' ? 'Carried over to ' + monthLabel(patch.incentiveMonth) : sel.value==='back' ? 'Pushed back' : sel.value==='noteligible' ? 'Marked not eligible' : 'Marked pending');
+    });
+  });
+
+  // multi-select + bulk status change
+  const visibleIds = new Set(orders.map(o=>o.id));
+  [...incSelected].forEach(id=>{ if(!visibleIds.has(id)) incSelected.delete(id); });
+  const bar = document.getElementById('inc-bar'), allBox = document.getElementById('inc-all');
+  const refreshBar = () => {
+    bar.style.display = incSelected.size ? 'flex' : 'none';
+    document.getElementById('inc-bar-count').textContent = incSelected.size + ' selected';
+    allBox.checked = orders.length>0 && incSelected.size===orders.length;
+    allBox.indeterminate = incSelected.size>0 && incSelected.size<orders.length;
+  };
+  page.querySelectorAll('.inc-sel').forEach(cb=>{
+    cb.addEventListener('change', ()=>{ cb.checked ? incSelected.add(cb.dataset.id) : incSelected.delete(cb.dataset.id); refreshBar(); });
+  });
+  allBox.addEventListener('change', ()=>{
+    if(allBox.checked) orders.forEach(o=>incSelected.add(o.id)); else incSelected.clear();
+    page.querySelectorAll('.inc-sel').forEach(cb=>{ cb.checked = incSelected.has(cb.dataset.id); });
+    refreshBar();
+  });
+  document.getElementById('inc-bar-clear').addEventListener('click', ()=>{
+    incSelected.clear();
+    page.querySelectorAll('.inc-sel').forEach(cb=>{ cb.checked=false; });
+    refreshBar();
+  });
+  document.getElementById('inc-bar-apply').addEventListener('click', ()=>{
+    const value = document.getElementById('inc-bar-action').value;
+    const label = document.querySelector('#inc-bar-action option:checked').textContent;
+    const picked = orders.filter(o=>incSelected.has(o.id));
+    const locked = picked.filter(isLocked);
+    const todo = picked.filter(o=>!isLocked(o) && patchFor(o,value));
+    if(!todo.length){ showToast(locked.length ? 'All selected orders are locked — unlock them first' : 'Nothing to change for this action'); return; }
+    const skipped = picked.length - todo.length;
+    showConfirm('Apply to '+todo.length+' order'+(todo.length!==1?'s':'')+'?',
+      label + '.' + (skipped ? ' ' + skipped + ' will be skipped (' + (locked.length? locked.length+' locked':'') + (locked.length && skipped>locked.length ? ', ' : '') + (skipped>locked.length ? (skipped-locked.length)+' not applicable':'') + ').' : ''),
+      async ()=>{
+        for(let i=0;i<todo.length;i+=20){
+          await Promise.all(todo.slice(i,i+20).map(o=>updateOrderField(o.id, patchFor(o,value))));
+        }
+        incSelected.clear();
+        showToast('Updated '+todo.length+' order'+(todo.length!==1?'s':''));
+        if(!db) return; renderIncentives(page);
+      }, 'Apply', true);
+  });
+  refreshBar();
+
+  page.querySelectorAll('.inc-lock').forEach(btn=>{
+    btn.addEventListener('click', async ()=>{
+      const o = allOrders.find(x=>x.id===btn.dataset.id); if(!o) return;
+      const nowLocked = isLocked(o);
+      await updateOrderField(o.id, {incentiveLocked: !nowLocked});
+      showToast(nowLocked ? 'Unlocked — you can change the status now' : 'Locked');
+    });
+  });
+  const bulkBtn = document.getElementById('btn-bulk-ne');
+  if(bulkBtn) bulkBtn.addEventListener('click', ()=>{
+    showConfirm('Mark all as not eligible?', `All ${bulkable.length} orders in this view will be marked not eligible for incentive in ${monthLabel(incentiveMonth)}. You can change any order back afterwards.`, async ()=>{
+      for(let i=0;i<bulkable.length;i+=20){
+        await Promise.all(bulkable.slice(i,i+20).map(o=>updateOrderField(o.id,{paymentStatus:'noteligible', incentiveLocked:false})));
+      }
+      showToast('Marked '+bulkable.length+' orders not eligible');
+    }, 'Confirm', true);
+  });
+
+  document.getElementById('btn-export').addEventListener('click', async ()=>{
+    const header = 'Incentive Month,Salesman,Order Ref,Channel,Gross Sales,Net Profit,Status,Incentive\n';
+    const lines = orders.map(o=>[monthLabel(o.incMonth),repName(o.rep),o.ref.replace(/,/g,' '),chName(o.channel),o.grossSales,o.netProfit??'',o.status==='full'?'Issued':(o.status==='noteligible'?'Not eligible':'Pending'),o.status==='full'?o.incentive:0].join(','));
+    const csv = header + lines.join('\n');
+    downloadBlob(new Blob([csv], {type:'text/csv'}), 'incentive-report.csv');
+    showToast('Export ready');
+  });
+}
+
+/* ============================================================
+   SETTINGS
+   ============================================================ */
+function renderSettings(page){
+  page.innerHTML = `
+    <div class="pagehead"><div><h1>Settings</h1><p>Incentive rate, plus the salesmen and channels used across the app.</p></div></div>
+
+    <div class="panel" style="margin-bottom:18px;max-width:420px;">
+      <h3>Incentive rate</h3>
+      <div class="field">
+        <label>Percentage of net profit paid on fully-recovered orders</label>
+        <input type="number" id="s-rate" step="0.1" value="${state.settings.incentiveRate ?? 5}">
+      </div>
+      <button class="btn btn-primary btn-sm" id="s-rate-save">Save rate</button>
+    </div>
+
+    <div class="chart-row" style="align-items:flex-start;">
+      <div class="panel">
+        <h3>Salesman names</h3>
+        <div class="settings-list" id="s-reps">
+        ${Object.keys(state.reps).map(code=>`
+          <div class="settings-row" style="grid-template-columns:70px 1fr auto;"><div class="code">${escapeHtml(code)}</div><input data-code="${escapeAttr(code)}" class="s-rep-name" value="${escapeAttr(state.reps[code])}"><button class="icon-btn s-del-rep" data-code="${escapeAttr(code)}" title="Remove salesman">✕</button></div>
+        `).join('')}
+        </div>
+        <div class="settings-row" style="margin-top:14px;padding-top:14px;border-top:1px solid var(--border-soft);grid-template-columns:70px 1fr auto;">
+          <input id="new-rep-code" placeholder="Code" maxlength="12"><input id="new-rep-name" placeholder="New salesman name"><button class="btn btn-primary btn-sm" id="add-rep">Add</button>
+        </div>
+        <div class="hint">New salesmen are eligible for incentive automatically.</div>
+      </div>
+      <div class="panel">
+        <h3>Channel names</h3>
+        <div class="settings-list" id="s-channels">
+        ${Object.keys(state.channels).map(code=>`
+          <div class="settings-row" style="grid-template-columns:70px 1fr auto;"><div class="code">${escapeHtml(code)}</div><input data-code="${escapeAttr(code)}" class="s-ch-name" value="${escapeAttr(state.channels[code])}"><button class="icon-btn s-del-ch" data-code="${escapeAttr(code)}" title="Remove channel">✕</button></div>
+        `).join('')}
+        </div>
+        <div class="settings-row" style="margin-top:14px;padding-top:14px;border-top:1px solid var(--border-soft);grid-template-columns:70px 1fr auto;">
+          <input id="new-ch-code" placeholder="Code" maxlength="12"><input id="new-ch-name" placeholder="New channel name"><button class="btn btn-primary btn-sm" id="add-ch">Add</button>
+        </div>
+      </div>
+    </div>
+  `;
+  const addEntry = async (kind)=>{
+    const code = document.getElementById('new-'+kind+'-code').value.trim().replace(/[\/\s]+/g,'');
+    const name = document.getElementById('new-'+kind+'-name').value.trim() || code;
+    if(!code){ showToast('Enter a code first'); return; }
+    if(kind==='rep'){ await saveRepName(code, name); } else { await saveChannelName(code, name); }
+    showToast((kind==='rep'?'Salesman':'Channel')+' added');
+  };
+  const wireDelete = (sel, kind)=>{
+    page.querySelectorAll(sel).forEach(btn=>{
+      btn.addEventListener('click', ()=>{
+        const code = btn.dataset.code;
+        const used = state.orders.filter(o=>(kind==='rep'?o.rep:o.channel)===code).length;
+        if(used){ showToast(`Can't remove ${code}: ${used} order${used!==1?'s use':' uses'} it`); return; }
+        showConfirm(`Remove ${kind==='rep'?'salesman':'channel'} ${code}?`, 'It has no orders, so nothing else changes.', async ()=>{
+          if(kind==='rep') await deleteRep(code); else await deleteChannel(code);
+          showToast('Removed ' + code);
+          if(!db) return; renderSettings(page);
+        });
+      });
+    });
+  };
+  wireDelete('.s-del-rep','rep'); wireDelete('.s-del-ch','ch');
+  document.getElementById('add-rep').addEventListener('click', ()=>addEntry('rep'));
+  document.getElementById('add-ch').addEventListener('click', ()=>addEntry('ch'));
+  document.getElementById('s-rate-save').addEventListener('click', async ()=>{
+    const v = parseFloat(document.getElementById('s-rate').value);
+    await saveSettings({...state.settings, incentiveRate: isNaN(v)?5:v});
+    showToast('Incentive rate updated');
+  });
+  page.querySelectorAll('.s-rep-name').forEach(inp=>{
+    inp.addEventListener('change', async ()=>{ await saveRepName(inp.dataset.code, inp.value.trim()||inp.dataset.code); showToast('Saved'); });
+  });
+  page.querySelectorAll('.s-ch-name').forEach(inp=>{
+    inp.addEventListener('change', async ()=>{ await saveChannelName(inp.dataset.code, inp.value.trim()||inp.dataset.code); showToast('Saved'); });
+  });
+}
+
+/* ============================================================
+   EXPENSES & TRUE NET PROFIT
+   ============================================================ */
+const EXPENSE_FIELDS = [
+  {key:'salaries', label:'Salaries'},
+  {key:'rent', label:'Rent'},
+  {key:'electricity', label:'Electricity'},
+  {key:'fuel', label:'Fuel & transportation'},
+  {key:'marketing', label:'IndiaMart & marketing'},
+  {key:'other', label:'Other miscellaneous expenses'},
+];
+let expensesFY = 'all';
+let expDraft = null;
+function renderExpenses(page){
+  const fys = availableFYs();
+  if(expensesFY!=='all' && !fys.includes(expensesFY)) expensesFY = 'all';
+  const saved = state.expenses || {};
+  const val = k => ((expDraft||{})[k]!==undefined ? expDraft[k] : (saved[k]||0));
+  const monthlyTotal = () => EXPENSE_FIELDS.reduce((t,f)=>t+(parseFloat(val(f.key))||0),0);
+
+  const orders = computedOrders().filter(o=> o.ledgerMonth && o.netProfit!==null && (expensesFY==='all' || fyStartYear(o.ledgerMonth)===expensesFY));
+  const byMonth = {};
+  computedOrders().forEach(o=>{
+    if(!o.ledgerMonth) return;
+    if(expensesFY!=='all' && fyStartYear(o.ledgerMonth)!==expensesFY) return;
+    byMonth[o.ledgerMonth] = byMonth[o.ledgerMonth] || 0;
+    if(o.netProfit!==null) byMonth[o.ledgerMonth] += o.netProfit;
+  });
+  const months = Object.keys(byMonth).sort();
+  const totalNet = round2(months.reduce((t,m)=>t+byMonth[m],0));
+
+  page.innerHTML = `
+    <div class="pagehead">
+      <div><h1>Expenses &amp; True NP</h1><p>Enter your monthly expenses. True net profit = net profit minus monthly expenses × the number of months with data.</p></div>
+      <div class="actions"><select id="exp-fy" style="width:auto;min-width:130px;">
+        <option value="all" ${expensesFY==='all'?'selected':''}>All years</option>
+        ${fys.map(y=>`<option value="${y}" ${expensesFY===y?'selected':''}>${fyLabel(y)}</option>`).join('')}
+      </select></div>
+    </div>
+    <div class="chart-row" style="align-items:flex-start;">
+      <div class="panel">
+        <h3>Monthly expenses</h3>
+        ${EXPENSE_FIELDS.map(f=>`
+          <div class="field"><label>${f.label}</label><input type="number" step="any" min="0" class="exp-in" data-key="${f.key}" value="${val(f.key)||''}" placeholder="0"></div>`).join('')}
+        <div class="exp-total"><span>Total per month</span><span class="num" id="exp-monthly">${fmtMoney(monthlyTotal())}</span></div>
+        <div style="margin-top:14px;display:flex;gap:8px;align-items:center;">
+          <button class="btn btn-primary" id="exp-save">Save expenses</button>
+          <span class="hint" id="exp-dirty" style="margin:0;"></span>
+        </div>
+      </div>
+      <div>
+        <div class="kpi-row" style="grid-template-columns:1fr 1fr;">
+          <div class="kpi"><div class="label">Net profit</div><div class="value num">${fmtMoney(totalNet)}</div><div class="sub">from sale orders</div></div>
+          <div class="kpi"><div class="label">Months of data</div><div class="value num">${months.length}</div><div class="sub">${months.length?escapeHtml(monthLabel(months[0]))+(months.length>1?' – '+escapeHtml(monthLabel(months[months.length-1])):''):'none yet'}</div></div>
+          <div class="kpi"><div class="label">Total expenses</div><div class="value num neg" id="exp-total-all">${fmtMoney(monthlyTotal()*months.length)}</div><div class="sub" id="exp-total-sub">${fmtMoney(monthlyTotal())} × ${months.length} month${months.length!==1?'s':''}</div></div>
+          <div class="kpi hero"><div class="label">True net profit</div><div class="value num" id="exp-true">${fmtMoney(round2(totalNet - monthlyTotal()*months.length))}</div><div class="sub">net profit − expenses</div></div>
+        </div>
+      </div>
+    </div>
+    <div class="panel" style="margin-bottom:18px;"><h3>Net profit vs true net profit by month</h3><div class="panel-chart"><canvas id="chTrue"></canvas></div></div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Month</th><th class="num">Net profit</th><th class="num">Expenses</th><th class="num">True net profit</th></tr></thead>
+        <tbody id="exp-rows"></tbody>
+        <tfoot><tr class="tot-row"><td>Total · ${months.length} month${months.length!==1?'s':''}</td><td class="num" id="ft-net"></td><td class="num" id="ft-exp"></td><td class="num" id="ft-true"></td></tr></tfoot>
+      </table>
+    </div>
+  `;
+
+  const dirty = () => EXPENSE_FIELDS.some(f=> (parseFloat(val(f.key))||0) !== (parseFloat(saved[f.key])||0));
+  function recalc(){
+    const mt = monthlyTotal();
+    document.getElementById('exp-monthly').textContent = fmtMoney(mt);
+    document.getElementById('exp-total-all').textContent = fmtMoney(mt*months.length);
+    document.getElementById('exp-total-sub').textContent = fmtMoney(mt)+' × '+months.length+' month'+(months.length!==1?'s':'');
+    const tn = round2(totalNet - mt*months.length);
+    const te = document.getElementById('exp-true'); te.textContent = fmtMoney(tn); te.className = 'value num '+(tn>=0?'pos':'neg');
+    document.getElementById('exp-rows').innerHTML = months.map(m=>{
+      const t = round2(byMonth[m]-mt);
+      return `<tr><td>${escapeHtml(monthLabel(m))}</td><td class="num">${fmtMoney(round2(byMonth[m]))}</td><td class="num">${fmtMoney(mt)}</td><td class="num ${t>=0?'':'neg'}" style="font-weight:600;">${fmtMoney(t)}</td></tr>`;
+    }).join('') || '<tr><td colspan="4" class="empty">No months with data yet.</td></tr>';
+    document.getElementById('ft-net').textContent = fmtMoney(totalNet);
+    document.getElementById('ft-exp').textContent = fmtMoney(mt*months.length);
+    document.getElementById('ft-true').textContent = fmtMoney(tn);
+    document.getElementById('exp-dirty').textContent = dirty() ? 'Unsaved changes' : '';
+    if(charts.trueNP){
+      charts.trueNP.data.datasets[1].data = months.map(m=>round2(byMonth[m]-mt));
+      charts.trueNP.update();
+    }
+  }
+  charts.trueNP = new Chart(document.getElementById('chTrue'), {
+    data:{labels:months.map(m=>MONTH_NAMES[parseInt(m.split('-')[1],10)-1].slice(0,3)+' '+m.slice(2,4)), datasets:[
+      {type:'bar', label:'Net profit', data:months.map(m=>round2(byMonth[m])), backgroundColor:'#7FA7C9', borderRadius:3, maxBarThickness:42},
+      {type:'line', label:'True net profit', data:months.map(m=>round2(byMonth[m]-monthlyTotal())), borderColor:'#F59E0B', backgroundColor:'#F59E0B', tension:.3, pointRadius:3}
+    ]},
+    options:{responsive:true, maintainAspectRatio:false, interaction:{mode:'index', intersect:false},
+      plugins:{legend:{display:true, position:'top', labels:{color:getSoftColor(), font:{family:'IBM Plex Sans', size:12}, boxWidth:12}}, tooltip:{callbacks:{label:(c)=>c.dataset.label+': '+fmtMoney(c.parsed.y)}}},
+      scales:{x:{grid:{display:false}, ticks:{color:getSoftColor()}}, y:{grid:{color:getGridColor()}, ticks:{color:getSoftColor(), font:{family:'IBM Plex Mono', size:10}, callback:v=>fmtMoney(v)}}}}
+  });
+  recalc();
+
+  page.querySelectorAll('.exp-in').forEach(inp=>{
+    inp.addEventListener('input', ()=>{ expDraft = {...(expDraft||{})}; expDraft[inp.dataset.key] = inp.value; recalc(); });
+  });
+  document.getElementById('exp-save').addEventListener('click', async ()=>{
+    const out = {};
+    EXPENSE_FIELDS.forEach(f=>{ out[f.key] = parseFloat(val(f.key))||0; });
+    expDraft = null;
+    await saveExpenses(out);
+    showToast('Expenses saved');
+  });
+  document.getElementById('exp-fy').addEventListener('change', e=>{ expensesFY = e.target.value==='all' ? 'all' : parseInt(e.target.value,10); renderExpenses(page); });
+}
+
+/* ============================================================
+   MONTHLY SUMMARY
+   ============================================================ */
+const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+function monthLabel(key){
+  if(!key) return 'No date';
+  const [y,m] = key.split('-');
+  return MONTH_NAMES[parseInt(m,10)-1] + ' ' + y;
+}
+function renderMonthly(page){
+  const orders = computedOrders();
+  const groups = {};
+  orders.forEach(o=>{
+    const key = o.ledgerMonth || (o.date ? o.date.slice(0,7) : 'undated');
+    if(!groups[key]) groups[key] = {key, count:0, gross:0, net:0, netKnown:0, pending:0, incentive:0, paid:0};
+    const g = groups[key];
+    g.count++;
+    g.gross += o.grossSales;
+    if(o.netProfit!==null){ g.net += o.netProfit; g.netKnown++; }
+    if(o.status!=='full') g.pending += o.grossSales;
+    g.incentive += o.incentive;
+    if(o.status==='full') g.paid++;
+  });
+  const rows = Object.values(groups).sort((a,b)=> b.key.localeCompare(a.key));
+
+  page.innerHTML = `
+    <div class="pagehead"><div><h1>Monthly Summary</h1><p>Sale orders grouped by ledger month — sales, profit and incentive trend over time.</p></div></div>
+    <div class="chart-row" style="grid-template-columns:1fr;">
+      <div class="panel"><h3>Gross sales &amp; net profit by month</h3><div class="panel-chart"><canvas id="chMonthly"></canvas></div></div>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr>
+          <th>Month</th><th class="num">Orders</th><th class="num">Gross sales</th><th class="num">Net profit</th>
+        </tr></thead>
+        <tbody>
+        ${rows.map(r=>`
+          <tr>
+            <td>${escapeHtml(monthLabel(r.key))}</td>
+            <td class="num">${r.count}</td>
+            <td class="num">${fmtMoney(r.gross)}</td>
+            <td class="num">${r.netKnown? fmtMoney(round2(r.net)) : '—'}</td>
+          </tr>`).join('') || '<tr><td colspan="4" class="empty">No orders yet.</td></tr>'}
+        </tbody>
+      </table>
+    </div>
+  `;
+
+  const chronological = [...rows].sort((a,b)=> a.key.localeCompare(b.key));
+  charts.monthly = new Chart(document.getElementById('chMonthly'), {
+    type:'bar',
+    data:{
+      labels: chronological.map(r=>monthLabel(r.key)),
+      datasets:[
+        {label:'Gross sales', data:chronological.map(r=>round2(r.gross)), backgroundColor:getAccentColor(), borderRadius:2, maxBarThickness:34},
+        {label:'Net profit', data:chronological.map(r=>round2(r.net)), backgroundColor:getInkColor(), borderRadius:2, maxBarThickness:34},
+      ]
+    },
+    options:{
+      responsive:true, maintainAspectRatio:false,
+      plugins:{legend:{display:true, position:'top', labels:{color:getSoftColor(), font:{family:'IBM Plex Sans', size:12}, boxWidth:12}}, tooltip:{callbacks:{label:(ctx)=>ctx.dataset.label+': '+fmtMoney(ctx.parsed.y)}}},
+      scales:{
+        x:{grid:{display:false}, ticks:{color:getSoftColor(), font:{family:'IBM Plex Sans', size:11}}},
+        y:{grid:{color:getGridColor()}, ticks:{color:getSoftColor(), font:{family:'IBM Plex Mono', size:10}, callback:v=>fmtMoney(v)}}
+      }
+    }
+  });
+}
+
+/* ============================================================
+   UTIL
+   ============================================================ */
+function escapeHtml(s){ return String(s??'').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function escapeAttr(s){ return escapeHtml(s); }
+function showConfirm(title, body, onConfirm, okLabel, safe){
+  closeAllOverlays();
+  const overlay = document.createElement('div');
+  overlay.className = 'overlay';
+  overlay.style.alignItems = 'center';
+  overlay.innerHTML = `
+    <div class="modal" style="max-width:380px;">
+      <h2 style="font-size:17px;">${escapeHtml(title)}</h2>
+      <p style="color:var(--ink-soft);font-size:13px;margin:0 0 4px;">${escapeHtml(body)}</p>
+      <div class="modal-foot">
+        <button class="btn" id="confirm-cancel">Cancel</button>
+        <button class="btn ${safe?'btn-primary':'btn-danger'}" ${safe?'':'style="border-color:var(--negative);"'} id="confirm-ok">${escapeHtml(okLabel||'Delete')}</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', e=>{ if(e.target===overlay) overlay.remove(); });
+  overlay.querySelector('#confirm-cancel').addEventListener('click', ()=>overlay.remove());
+  overlay.querySelector('#confirm-ok').addEventListener('click', async ()=>{
+    overlay.remove();
+    await onConfirm();
+  });
+}
+let toastTimer=null;
+function showToast(msg){
+  let el = document.querySelector('.toast');
+  if(el) el.remove();
+  el = document.createElement('div');
+  el.className='toast'; el.textContent=msg;
+  document.body.appendChild(el);
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(()=>el.remove(), 2200);
+}
+
+/* ============================================================
+   BOOT
+   ============================================================ */
+/* Sign-in screen (Firebase Auth, email + password). Accounts are created in the
+   Firebase console; there is no self sign-up. */
+function showLogin(onSubmit, onReset){
+  closeAllOverlays();
+  const overlay = document.createElement('div');
+  overlay.className = 'overlay';
+  overlay.id = 'login-overlay';
+  overlay.style.alignItems = 'center';
+  overlay.innerHTML = `
+    <div class="modal" style="max-width:380px;">
+      <h2>Sign in</h2>
+      <form id="login-form">
+        <div class="field"><label>Email</label><input required type="email" name="email" autocomplete="username"></div>
+        <div class="field"><label>Password</label><input required type="password" name="password" autocomplete="current-password"></div>
+        <p id="login-error" style="color:var(--negative);font-size:13px;margin:0;min-height:18px;"></p>
+        <div class="modal-foot">
+          <button type="button" class="btn" id="login-reset">Forgot password</button>
+          <button type="submit" class="btn btn-primary" id="login-submit">Sign in</button>
+        </div>
+      </form>
+    </div>`;
+  document.body.appendChild(overlay);
+  const form = overlay.querySelector('#login-form');
+  const err = overlay.querySelector('#login-error');
+  form.addEventListener('submit', async e=>{
+    e.preventDefault();
+    err.textContent = '';
+    const btn = overlay.querySelector('#login-submit');
+    btn.disabled = true;
+    try{ await onSubmit(form.email.value.trim(), form.password.value); }
+    catch(ex){ err.textContent = 'Wrong email or password.'; btn.disabled = false; }
+  });
+  overlay.querySelector('#login-reset').addEventListener('click', async ()=>{
+    const email = form.email.value.trim();
+    if(!email){ err.textContent = 'Enter your email first.'; return; }
+    try{ await onReset(email); showToast('Password reset email sent'); }
+    catch(ex){ err.textContent = 'Could not send reset email.'; }
+  });
+}
+</script>
+<script type="module">
+import { initializeApp } from 'https://www.gstatic.com/firebasejs/12.4.0/firebase-app.js';
+import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, sendPasswordResetEmail, signOut } from 'https://www.gstatic.com/firebasejs/12.4.0/firebase-auth.js';
+import { getFirestore, collection, doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, onSnapshot, query, limit } from 'https://www.gstatic.com/firebasejs/12.4.0/firebase-firestore.js';
+
+const firebaseConfig = {
+  apiKey: 'AIzaSyCnRbxcrCl_sqiILspT-pNScxmI6adYc_s',
+  authDomain: 'alfa-ledger-14b79.firebaseapp.com',
+  projectId: 'alfa-ledger-14b79',
+  storageBucket: 'alfa-ledger-14b79.firebasestorage.app',
+  messagingSenderId: '34522754631',
+  appId: '1:34522754631:web:1468c47ac8f61534f04b62',
+};
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+window.fb = { db: getFirestore(app), collection, doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, onSnapshot, query, limit };
+
+document.getElementById('btn-signout').addEventListener('click', async ()=>{
+  await signOut(auth);
+  location.reload();   // drops live listeners and in-memory data
+});
+
+let started = false;
+onAuthStateChanged(auth, user=>{
+  if(user){
+    document.getElementById('login-overlay')?.remove();
+    document.getElementById('signed-in-as').textContent = user.email;
+    document.getElementById('sidebar-foot').hidden = false;
+    if(!started){ started = true; startApp(); }
+  }else{
+    showLogin(
+      (email, password)=>signInWithEmailAndPassword(auth, email, password),
+      email=>sendPasswordResetEmail(auth, email),
+    );
+  }
+});
+</script>
+<!-- v: month-only orders -->
+</body>
+</html>
