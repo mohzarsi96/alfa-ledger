@@ -63,38 +63,5 @@ service cloud.firestore {
         allow write: if tab(co, 'expenses');
       }
     }
-
-    // TRANSITION ONLY: the pre-companies app keeps Alfa's data at the root and
-    // uses users/{uid}.pages. Remove this block (and the root data) once the
-    // companies version is live and Alfa's data is synced to companies/alfa.
-    function oldTab(id) {
-      return active() && (me().role == 'admin' || id in me().get('pages', []));
-    }
-    match /orders/{id} {
-      allow read: if active();
-      allow write: if oldTab('orders') || oldTab('incentives');
-    }
-    match /reps/{id} {
-      allow read: if active();
-      allow create: if oldTab('orders') || oldTab('settings');
-      allow update, delete: if oldTab('settings');
-    }
-    match /channels/{id} {
-      allow read: if active();
-      allow create: if oldTab('orders') || oldTab('settings');
-      allow update, delete: if oldTab('settings');
-    }
-    match /meta/months {
-      allow read: if active();
-      allow write: if oldTab('orders');
-    }
-    match /meta/settings {
-      allow read: if active();
-      allow write: if oldTab('settings');
-    }
-    match /meta/expenses {
-      allow read: if active();
-      allow write: if oldTab('expenses');
-    }
   }
 }
