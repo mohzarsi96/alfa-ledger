@@ -273,6 +273,10 @@ td.ref .sub{font-size:11px;color:var(--ink-faint);font-family:'IBM Plex Sans',sa
 .muted{color:var(--ink-faint);}
 .hint{font-size:12px;color:var(--ink-faint);margin-top:4px;}
 .empty{padding:50px 20px;text-align:center;color:var(--ink-faint);}
+.tab-checks{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px 16px;}
+.tab-check{display:flex;align-items:center;gap:8px;margin:0;font-size:13px;font-weight:400;color:var(--ink);cursor:pointer;}
+.tab-check input{width:auto;}
+.tab-checks.off{opacity:.45;pointer-events:none;}
 .badge-count{background:var(--surface-sunk);color:var(--ink-soft);border-radius:var(--radius-pill);padding:1px 8px;font-size:11px;margin-left:auto;}
 .section-note{font-size:13px;color:var(--ink-soft);background:linear-gradient(135deg, var(--warn-soft), color-mix(in srgb, var(--warn-soft) 50%, var(--surface)));border:1px solid var(--border-soft);border-radius:var(--radius);padding:13px 16px;margin-bottom:18px;}
 .rep-group{margin-bottom:24px;}
@@ -368,6 +372,8 @@ let state = {
   expenses: {salaries:0, rent:0, electricity:0, fuel:0, marketing:0, other:0},
   months: [],       // list of ledger-month tabs (YYYY-MM), manually added or inferred
   ready: false,
+  me: null,         // signed-in user's users/{uid} doc: {email,name,role,pages,active}
+  users: [],        // all users (admin only)
 };
 let db = null;
 let currentPage = 'dashboard';
@@ -449,7 +455,7 @@ const STATUS_LABELS = {full:'Payment received', partial:'Pending', none:'Pending
 const colRef = name => fb.collection(fb.db, name);
 const docRef = path => fb.doc(fb.db, path);
 
-async function startApp(){
+async function startApp(user){
   db = (window.fb && fb.db) || null;
 
   if(!db){
@@ -460,8 +466,35 @@ async function startApp(){
     return;
   }
 
-  await ensureSeeded();
+  let meSnap = null;
+  try{ meSnap = await fb.getDoc(docRef('users/'+user.uid)); }catch(e){ console.error('load user failed', e); }
+  if(!meSnap || !meSnap.exists() || meSnap.data().active !== true){ showNoAccess(user.email); return; }
+  state.me = {uid:user.uid, ...meSnap.data()};
+
+  if(isAdmin()) await ensureSeeded();
   subscribeAll();
+}
+
+/* ============================================================
+   USERS & TAB ACCESS
+   users/{uid}: {email, name, role:'admin'|'user', pages:[page ids], active}
+   Admins see every tab. firestore.rules enforces the same access for writes.
+   ============================================================ */
+function isAdmin(){ return !!state.me && state.me.role === 'admin'; }
+function canSee(pageId){
+  if(!db) return true;
+  const p = PAGES.find(x=>x.id===pageId);
+  if(!p || !state.me) return false;
+  if(isAdmin()) return true;
+  return !p.adminOnly && (state.me.pages||[]).includes(pageId);
+}
+function visiblePages(){ return PAGES.filter(p=>canSee(p.id)); }
+function showNoAccess(email){
+  document.getElementById('nav').innerHTML = '';
+  document.getElementById('page').innerHTML = `<div class="empty">The account <b>${escapeHtml(email)}</b> doesn't have access to the ledger.<br>Ask the admin to add you or re-enable your account.</div>`;
+}
+async function saveUser(uid, data){
+  await fb.setDoc(docRef('users/'+uid), data, {merge:true});
 }
 
 function seedLocal(){
@@ -543,6 +576,20 @@ function subscribeAll(){
     state.months = snap.exists() ? (snap.data().list||['2026-08']) : ['2026-08'];
     render();
   });
+
+  // Own access record: tab changes by the admin apply live; disabling signs the user out of the data.
+  fb.onSnapshot(docRef('users/'+state.me.uid), snap=>{
+    if(!snap.exists() || snap.data().active !== true){ location.reload(); return; }
+    state.me = {uid:state.me.uid, ...snap.data()};
+    render();
+  });
+
+  if(isAdmin()){
+    fb.onSnapshot(colRef('users'), snap=>{
+      state.users = snap.docs.map(d=>({uid:d.id, ...d.data()}));
+      render();
+    });
+  }
 }
 
 async function saveOrder(order){
@@ -658,11 +705,12 @@ const PAGES = [
   {id:'monthly', label:'Monthly Summary', icon:'M8 7V3m8 4V3M4 11h16M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z'},
   {id:'expenses', label:'Expenses & True NP', icon:'M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z'},
   {id:'settings', label:'Settings', icon:'M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z M15 12a3 3 0 11-6 0 3 3 0 016 0z'},
+  {id:'users', label:'Users', adminOnly:true, icon:'M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z'},
 ];
 
 function renderNav(){
   const nav = document.getElementById('nav');
-  nav.innerHTML = PAGES.map(p=>`
+  nav.innerHTML = visiblePages().map(p=>`
     <a data-page="${p.id}" class="${currentPage===p.id?'active':''}">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="${p.icon}"/></svg>
       ${p.label}
@@ -687,6 +735,7 @@ document.getElementById('menu-btn').addEventListener('click', ()=> document.getE
    RENDER ROOT
    ============================================================ */
 function render(){
+  if(!canSee(currentPage)) currentPage = (visiblePages()[0]||{}).id;
   renderNav();
   const page = document.getElementById('page');
   if(!state.ready){ page.innerHTML = '<div class="empty">Loading ledger…</div>'; return; }
@@ -701,6 +750,8 @@ function render(){
   else if(currentPage==='monthly') renderMonthly(page);
   else if(currentPage==='expenses') renderExpenses(page);
   else if(currentPage==='settings') renderSettings(page);
+  else if(currentPage==='users') renderUsers(page);
+  else page.innerHTML = '<div class="empty">No tabs have been assigned to your account yet. Ask the admin.</div>';
 }
 
 /* ============================================================
@@ -1944,6 +1995,155 @@ function renderSettings(page){
 }
 
 /* ============================================================
+   USERS (admin only)
+   ============================================================ */
+const ASSIGNABLE_PAGES = () => PAGES.filter(p=>!p.adminOnly);
+function tabChecks(selected, admin){
+  return `<div class="tab-checks ${admin?'off':''}">${ASSIGNABLE_PAGES().map(p=>`
+    <label class="tab-check"><input type="checkbox" value="${p.id}" ${admin||selected.includes(p.id)?'checked':''}> ${escapeHtml(p.label)}</label>`).join('')}</div>`;
+}
+function readTabChecks(root){ return [...root.querySelectorAll('.tab-checks input:checked')].map(i=>i.value); }
+function wireRoleToggle(root){
+  const sel = root.querySelector('select[name="role"]');
+  const box = root.querySelector('.tab-checks');
+  const sync = ()=>{
+    box.classList.toggle('off', sel.value==='admin');
+    if(sel.value==='admin') box.querySelectorAll('input').forEach(i=>{ i.checked = true; });
+  };
+  sel.addEventListener('change', sync);
+}
+function userTabsLabel(u){
+  if(u.role==='admin') return 'All tabs';
+  const labels = ASSIGNABLE_PAGES().filter(p=>(u.pages||[]).includes(p.id)).map(p=>p.label);
+  return labels.length ? labels.join(', ') : 'No tabs';
+}
+const AUTH_ERRORS = {
+  'auth/email-already-in-use':'An account with this email already exists.',
+  'auth/invalid-email':'That email address is not valid.',
+  'auth/weak-password':'Password must be at least 6 characters.',
+};
+
+function renderUsers(page){
+  const users = [...state.users].sort((a,b)=>(b.active===true)-(a.active===true) || String(a.name||a.email).localeCompare(String(b.name||b.email)));
+  page.innerHTML = `
+    <div class="pagehead"><div><h1>Users</h1><p>Add people who can sign in, and choose which tabs each one can open.</p></div></div>
+
+    <div class="panel" style="margin-bottom:18px;">
+      <h3>Add user</h3>
+      <form id="u-add">
+        <div class="field-row">
+          <div class="field"><label>Name</label><input name="name" required placeholder="e.g. Ajay"></div>
+          <div class="field"><label>Email</label><input name="email" type="email" required autocomplete="off"></div>
+        </div>
+        <div class="field-row">
+          <div class="field"><label>Starting password</label><input name="password" type="text" required minlength="6" autocomplete="new-password" placeholder="At least 6 characters"></div>
+          <div class="field"><label>Role</label><select name="role"><option value="user">User: only the tabs ticked below</option><option value="admin">Admin: all tabs, can manage users</option></select></div>
+        </div>
+        <div class="field"><label>Tabs this user can open</label>${tabChecks([], false)}</div>
+        <p id="u-add-error" style="color:var(--negative);font-size:13px;margin:0;min-height:18px;"></p>
+        <button type="submit" class="btn btn-primary btn-sm" id="u-add-btn">Add user</button>
+        <div class="hint">Give the person their email and starting password. They can change it with "Forgot password" on the sign-in screen.</div>
+      </form>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Tabs</th><th>Status</th><th></th></tr></thead>
+        <tbody>
+        ${users.map(u=>`
+          <tr>
+            <td>${escapeHtml(u.name||'—')}${u.uid===state.me.uid?' <span class="hint">(you)</span>':''}</td>
+            <td>${escapeHtml(u.email||'')}</td>
+            <td>${u.role==='admin'?'Admin':'User'}</td>
+            <td style="max-width:320px;">${escapeHtml(userTabsLabel(u))}</td>
+            <td>${u.active===true?'<span class="pill pill-paid">Active</span>':'<span class="pill pill-pending">Disabled</span>'}</td>
+            <td style="text-align:right;"><button class="btn btn-sm u-edit" data-uid="${escapeAttr(u.uid)}">Edit</button></td>
+          </tr>`).join('') || '<tr><td colspan="6" class="empty">No users yet.</td></tr>'}
+        </tbody>
+      </table>
+    </div>
+  `;
+
+  const form = document.getElementById('u-add');
+  wireRoleToggle(form);
+  form.addEventListener('submit', async e=>{
+    e.preventDefault();
+    const err = document.getElementById('u-add-error');
+    const btn = document.getElementById('u-add-btn');
+    err.textContent = '';
+    const email = form.email.value.trim().toLowerCase();
+    const role = form.role.value;
+    const pages = role==='admin' ? [] : readTabChecks(form);
+    if(role!=='admin' && !pages.length){ err.textContent = 'Tick at least one tab.'; return; }
+    btn.disabled = true;
+    try{
+      const uid = await fb.createUser(email, form.password.value);
+      await saveUser(uid, {email, name:form.name.value.trim(), role, pages, active:true, createdAt:new Date().toISOString()});
+      showToast('User added: ' + email);
+    }catch(ex){
+      console.error(ex);
+      err.textContent = AUTH_ERRORS[ex.code] || 'Could not add the user. ' + (ex.message||'');
+      btn.disabled = false;
+    }
+  });
+
+  page.querySelectorAll('.u-edit').forEach(b=>b.addEventListener('click', ()=>openUserModal(b.dataset.uid)));
+}
+
+function openUserModal(uid){
+  const u = state.users.find(x=>x.uid===uid);
+  if(!u) return;
+  const self = uid === state.me.uid;
+  closeAllOverlays();
+  const overlay = document.createElement('div');
+  overlay.className = 'overlay';
+  overlay.innerHTML = `
+    <div class="modal">
+      <h2>Edit user</h2>
+      <form id="u-edit-form">
+        <div class="field"><label>Email</label><input value="${escapeAttr(u.email||'')}" disabled></div>
+        <div class="field-row">
+          <div class="field"><label>Name</label><input name="name" value="${escapeAttr(u.name||'')}"></div>
+          <div class="field"><label>Role</label><select name="role" ${self?'disabled':''}>
+            <option value="user" ${u.role!=='admin'?'selected':''}>User</option>
+            <option value="admin" ${u.role==='admin'?'selected':''}>Admin</option>
+          </select></div>
+        </div>
+        <div class="field"><label>Tabs this user can open</label>${tabChecks(u.pages||[], u.role==='admin')}</div>
+        <div class="field"><label class="tab-check"><input type="checkbox" name="active" ${u.active===true?'checked':''} ${self?'disabled':''}> Account active (untick to block this person from signing in to the ledger)</label></div>
+        ${self?'<div class="hint">You can\'t remove your own admin role or disable yourself.</div>':''}
+        <p id="u-edit-error" style="color:var(--negative);font-size:13px;margin:0;min-height:18px;"></p>
+        <div class="modal-foot">
+          <button type="button" class="btn" id="u-reset" style="margin-right:auto;">Send password reset email</button>
+          <button type="button" class="btn" id="u-cancel">Cancel</button>
+          <button type="submit" class="btn btn-primary">Save</button>
+        </div>
+      </form>
+    </div>`;
+  document.body.appendChild(overlay);
+  const form = overlay.querySelector('#u-edit-form');
+  wireRoleToggle(form);
+  overlay.addEventListener('click', e=>{ if(e.target===overlay) overlay.remove(); });
+  overlay.querySelector('#u-cancel').addEventListener('click', ()=>overlay.remove());
+  overlay.querySelector('#u-reset').addEventListener('click', async ()=>{
+    try{ await fb.resetPassword(u.email); showToast('Reset email sent to ' + u.email); }
+    catch(ex){ overlay.querySelector('#u-edit-error').textContent = 'Could not send the reset email.'; }
+  });
+  form.addEventListener('submit', async e=>{
+    e.preventDefault();
+    const role = self ? 'admin' : form.role.value;
+    const pages = role==='admin' ? [] : readTabChecks(form);
+    const active = self ? true : form.active.checked;
+    if(role!=='admin' && active && !pages.length){ overlay.querySelector('#u-edit-error').textContent = 'Tick at least one tab.'; return; }
+    try{
+      await saveUser(uid, {name:form.name.value.trim(), role, pages, active});
+      overlay.remove();
+      showToast('Saved');
+    }catch(ex){ console.error(ex); overlay.querySelector('#u-edit-error').textContent = 'Could not save. ' + (ex.message||''); }
+  });
+}
+
+/* ============================================================
    EXPENSES & TRUE NET PROFIT
    ============================================================ */
 const EXPENSE_FIELDS = [
@@ -2209,7 +2409,7 @@ function showLogin(onSubmit, onReset){
 </script>
 <script type="module">
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/12.4.0/firebase-app.js';
-import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, sendPasswordResetEmail, signOut } from 'https://www.gstatic.com/firebasejs/12.4.0/firebase-auth.js';
+import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, sendPasswordResetEmail, signOut, createUserWithEmailAndPassword } from 'https://www.gstatic.com/firebasejs/12.4.0/firebase-auth.js';
 import { getFirestore, collection, doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, onSnapshot, query, limit } from 'https://www.gstatic.com/firebasejs/12.4.0/firebase-firestore.js';
 
 const firebaseConfig = {
@@ -2222,7 +2422,18 @@ const firebaseConfig = {
 };
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
-window.fb = { db: getFirestore(app), collection, doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, onSnapshot, query, limit };
+// Admins create accounts through a second app instance, so creating a user
+// doesn't sign the admin out of the main one.
+const userAdminAuth = getAuth(initializeApp(firebaseConfig, 'user-admin'));
+async function createUser(email, password){
+  const cred = await createUserWithEmailAndPassword(userAdminAuth, email, password);
+  await signOut(userAdminAuth);
+  return cred.user.uid;
+}
+window.fb = {
+  db: getFirestore(app), collection, doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, onSnapshot, query, limit,
+  createUser, resetPassword: email=>sendPasswordResetEmail(auth, email),
+};
 
 document.getElementById('btn-signout').addEventListener('click', async ()=>{
   await signOut(auth);
@@ -2235,7 +2446,7 @@ onAuthStateChanged(auth, user=>{
     document.getElementById('login-overlay')?.remove();
     document.getElementById('signed-in-as').textContent = user.email;
     document.getElementById('sidebar-foot').hidden = false;
-    if(!started){ started = true; startApp(); }
+    if(!started){ started = true; startApp(user); }
   }else{
     showLogin(
       (email, password)=>signInWithEmailAndPassword(auth, email, password),

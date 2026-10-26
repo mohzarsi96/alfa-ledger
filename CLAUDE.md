@@ -17,6 +17,7 @@ Goal of this project: host it on Firebase (Firestore + Auth + Hosting) under the
   paymentStatus ('none'|'full'|'noteligible'), incentiveMonth ('YYYY-MM' or null; set when carried over),
   incentiveLocked (bool), notes
 - `reps/{code}` {code,name}; `channels/{code}` {code,name}
+- `users/{uid}` {email,name,role:'admin'|'user',pages:[tab ids],active}: access record. Admins add users and set tabs in the Users tab; firestore.rules require an active users doc and gate writes by tab. Recovery/first admin: `node scripts/set-access.mjs serviceAccount.json <email> admin`.
 - `meta/settings` {incentiveRate:5}; `meta/months` {list:[...]}; `meta/expenses` {salaries,rent,electricity,fuel,marketing,other}
 
 ## Business rules
