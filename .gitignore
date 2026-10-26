@@ -2,6 +2,7 @@
 serviceAccount.json
 *-firebase-adminsdk-*.json
 data-export.json
+old-alfa-backup-*.json
 
 node_modules/
 .firebase/
