@@ -273,6 +273,7 @@ td.ref .sub{font-size:11px;color:var(--ink-faint);font-family:'IBM Plex Sans',sa
 .muted{color:var(--ink-faint);}
 .hint{font-size:12px;color:var(--ink-faint);margin-top:4px;}
 .empty{padding:50px 20px;text-align:center;color:var(--ink-faint);}
+[hidden]{display:none !important;}
 .tab-checks{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px 16px;}
 .tab-check{display:flex;align-items:center;gap:8px;margin:0;font-size:13px;font-weight:400;color:var(--ink);cursor:pointer;}
 .tab-check input{width:auto;}
@@ -348,6 +349,7 @@ thead th{background:var(--accent-soft);color:var(--accent-ink);}
     <nav id="nav"></nav>
     <div id="sidebar-foot" hidden>
       <div class="rate" id="signed-in-as" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></div>
+      <button class="btn btn-sm" id="btn-switch-company" style="margin-top:8px;" hidden>Switch company</button>
       <button class="btn btn-sm" id="btn-signout" style="margin-top:8px;">Sign out</button>
     </div>
   </aside>
@@ -372,7 +374,7 @@ let state = {
   expenses: {salaries:0, rent:0, electricity:0, fuel:0, marketing:0, other:0},
   months: [],       // list of ledger-month tabs (YYYY-MM), manually added or inferred
   ready: false,
-  me: null,         // signed-in user's users/{uid} doc: {email,name,role,pages,active}
+  me: null,         // signed-in user's users/{uid} doc: {email,name,role,access,active}
   users: [],        // all users (admin only)
 };
 let db = null;
@@ -452,8 +454,25 @@ const STATUS_LABELS = {full:'Payment received', partial:'Pending', none:'Pending
 /* Firestore (modular SDK). The module script at the bottom of the page sets
    window.fb = {db, collection, doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, onSnapshot, query, limit}
    and calls startApp() once the user is signed in. */
-const colRef = name => fb.collection(fb.db, name);
-const docRef = path => fb.doc(fb.db, path);
+/* Companies share users and the app; each has its own data under companies/{id}/. */
+const COMPANIES = [
+  {id:'alfa',  name:'Alfa',  suffix:'Enterprises'},
+  {id:'muzaf', name:'Muzaf', suffix:'Enterprise'},
+];
+const LAST_COMPANY_KEY = 'ledger.company';
+function readLastCompany(){
+  let id = null;
+  try{ id = localStorage.getItem(LAST_COMPANY_KEY); }catch(e){}
+  return COMPANIES.some(c=>c.id===id) ? id : COMPANIES[0].id;
+}
+function rememberCompany(id){ try{ localStorage.setItem(LAST_COMPANY_KEY, id); }catch(e){} }
+let currentCompany = readLastCompany();
+const company = () => COMPANIES.find(c=>c.id===currentCompany);
+const companyLabel = c => c.name + ' ' + c.suffix;
+
+const colRef = name => fb.collection(fb.db, 'companies/'+currentCompany+'/'+name);
+const docRef = path => fb.doc(fb.db, 'companies/'+currentCompany+'/'+path);
+const userRef = uid => fb.doc(fb.db, 'users/'+uid);
 
 async function startApp(user){
   db = (window.fb && fb.db) || null;
@@ -467,9 +486,16 @@ async function startApp(user){
   }
 
   let meSnap = null;
-  try{ meSnap = await fb.getDoc(docRef('users/'+user.uid)); }catch(e){ console.error('load user failed', e); }
+  try{ meSnap = await fb.getDoc(userRef(user.uid)); }catch(e){ console.error('load user failed', e); }
   if(!meSnap || !meSnap.exists() || meSnap.data().active !== true){ showNoAccess(user.email); return; }
   state.me = {uid:user.uid, ...meSnap.data()};
+  showCompanyBrand();
+  if(!hasCompany(currentCompany)){
+    const other = COMPANIES.find(c=>hasCompany(c.id));
+    if(!other){ showNoAccess(user.email); return; }
+    showNoAccess(user.email, other);
+    return;
+  }
 
   if(isAdmin()) await ensureSeeded();
   subscribeAll();
@@ -477,24 +503,60 @@ async function startApp(user){
 
 /* ============================================================
    USERS & TAB ACCESS
-   users/{uid}: {email, name, role:'admin'|'user', pages:[page ids], active}
-   Admins see every tab. firestore.rules enforces the same access for writes.
+   users/{uid}: {email, name, role:'admin'|'user', access:{companyId:[page ids]}, active}
+   Admins see every tab of every company. A user can open a company only if it
+   has at least one tab ticked. firestore.rules enforces the same access for writes.
    ============================================================ */
 function isAdmin(){ return !!state.me && state.me.role === 'admin'; }
+function tabsFor(u, cid){ return ((u && u.access) || {})[cid] || []; }
+function hasCompany(cid){ return isAdmin() || tabsFor(state.me, cid).length > 0; }
 function canSee(pageId){
   if(!db) return true;
   const p = PAGES.find(x=>x.id===pageId);
   if(!p || !state.me) return false;
   if(isAdmin()) return true;
-  return !p.adminOnly && (state.me.pages||[]).includes(pageId);
+  return !p.adminOnly && tabsFor(state.me, currentCompany).includes(pageId);
 }
 function visiblePages(){ return PAGES.filter(p=>canSee(p.id)); }
-function showNoAccess(email){
+function showNoAccess(email, other){
   document.getElementById('nav').innerHTML = '';
-  document.getElementById('page').innerHTML = `<div class="empty">The account <b>${escapeHtml(email)}</b> doesn't have access to the ledger.<br>Ask the admin to add you or re-enable your account.</div>`;
+  document.getElementById('page').innerHTML = other
+    ? `<div class="empty">The account <b>${escapeHtml(email)}</b> doesn't have access to ${escapeHtml(companyLabel(company()))}.<br><br><button class="btn btn-primary" id="go-other">Open ${escapeHtml(companyLabel(other))}</button></div>`
+    : `<div class="empty">The account <b>${escapeHtml(email)}</b> doesn't have access to the ledger.<br>Ask the admin to add you or re-enable your account.</div>`;
+  if(other) document.getElementById('go-other').addEventListener('click', ()=>switchCompany(other.id));
+}
+function showCompanyBrand(){
+  const c = company();
+  document.title = companyLabel(c) + ' — Sales & Incentive Ledger';
+  document.querySelector('#brand .mark').textContent = c.name[0];
+  document.querySelector('#brand .word').innerHTML = `${escapeHtml(c.name)}<em>·</em>${escapeHtml(c.suffix)}`;
+  const sw = document.getElementById('btn-switch-company');
+  if(sw) sw.hidden = !state.me || COMPANIES.filter(x=>hasCompany(x.id)).length < 2;
+}
+/* Reloading drops the previous company's live listeners and in-memory data. */
+function switchCompany(id){ rememberCompany(id); location.reload(); }
+function openCompanySwitcher(){
+  closeAllOverlays();
+  const overlay = document.createElement('div');
+  overlay.className = 'overlay';
+  overlay.style.alignItems = 'center';
+  overlay.innerHTML = `
+    <div class="modal" style="max-width:340px;">
+      <h2>Switch company</h2>
+      <div class="settings-list">
+        ${COMPANIES.filter(c=>hasCompany(c.id)).map(c=>`
+          <button class="btn ${c.id===currentCompany?'btn-primary':''} co-pick" data-id="${c.id}" style="justify-content:flex-start;">${escapeHtml(companyLabel(c))}</button>`).join('')}
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', e=>{ if(e.target===overlay) overlay.remove(); });
+  overlay.querySelectorAll('.co-pick').forEach(b=>b.addEventListener('click', ()=>{
+    if(b.dataset.id===currentCompany){ overlay.remove(); return; }
+    switchCompany(b.dataset.id);
+  }));
 }
 async function saveUser(uid, data){
-  await fb.setDoc(docRef('users/'+uid), data, {merge:true});
+  await fb.setDoc(userRef(uid), data, {merge:true});
 }
 
 function seedLocal(){
@@ -578,14 +640,16 @@ function subscribeAll(){
   });
 
   // Own access record: tab changes by the admin apply live; disabling signs the user out of the data.
-  fb.onSnapshot(docRef('users/'+state.me.uid), snap=>{
+  fb.onSnapshot(userRef(state.me.uid), snap=>{
     if(!snap.exists() || snap.data().active !== true){ location.reload(); return; }
     state.me = {uid:state.me.uid, ...snap.data()};
+    if(!hasCompany(currentCompany)){ location.reload(); return; }
+    showCompanyBrand();
     render();
   });
 
   if(isAdmin()){
-    fb.onSnapshot(colRef('users'), snap=>{
+    fb.onSnapshot(fb.collection(fb.db, 'users'), snap=>{
       state.users = snap.docs.map(d=>({uid:d.id, ...d.data()}));
       render();
     });
@@ -1369,7 +1433,7 @@ async function downloadTemplate(){
   const wb = buildTemplateWorkbook();
   const arr = XLSX.write(wb, {bookType:'xlsx', type:'array'});
   const blob = new Blob([arr], {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
-  downloadBlob(blob, 'Alfa-Enterprises-Sale-Orders-Template.xlsx');
+  downloadBlob(blob, companyLabel(company()).replace(/\s+/g,'-') + '-Sale-Orders-Template.xlsx');
   showToast('Template ready');
 }
 function downloadBlob(blob, filename){
@@ -1998,24 +2062,40 @@ function renderSettings(page){
    USERS (admin only)
    ============================================================ */
 const ASSIGNABLE_PAGES = () => PAGES.filter(p=>!p.adminOnly);
-function tabChecks(selected, admin){
-  return `<div class="tab-checks ${admin?'off':''}">${ASSIGNABLE_PAGES().map(p=>`
-    <label class="tab-check"><input type="checkbox" value="${p.id}" ${admin||selected.includes(p.id)?'checked':''}> ${escapeHtml(p.label)}</label>`).join('')}</div>`;
+/* One block of tab checkboxes per company; a company with nothing ticked is no access. */
+function companyTabChecks(u, admin){
+  return COMPANIES.map(c=>{
+    const selected = tabsFor(u, c.id);
+    return `<div class="field"><label>${escapeHtml(companyLabel(c))}: tabs this user can open</label>
+      <div class="tab-checks ${admin?'off':''}" data-company="${c.id}">${ASSIGNABLE_PAGES().map(p=>`
+        <label class="tab-check"><input type="checkbox" value="${p.id}" ${admin||selected.includes(p.id)?'checked':''}> ${escapeHtml(p.label)}</label>`).join('')}</div>
+    </div>`;
+  }).join('') + `<div class="hint" style="margin:-6px 0 12px;">Leave every tab unticked for a company to keep this user out of it.</div>`;
 }
-function readTabChecks(root){ return [...root.querySelectorAll('.tab-checks input:checked')].map(i=>i.value); }
+function readAccess(root){
+  const access = {};
+  root.querySelectorAll('.tab-checks[data-company]').forEach(box=>{
+    access[box.dataset.company] = [...box.querySelectorAll('input:checked')].map(i=>i.value);
+  });
+  return access;
+}
+const hasAnyTab = access => Object.values(access).some(list=>list.length);
 function wireRoleToggle(root){
   const sel = root.querySelector('select[name="role"]');
-  const box = root.querySelector('.tab-checks');
   const sync = ()=>{
-    box.classList.toggle('off', sel.value==='admin');
-    if(sel.value==='admin') box.querySelectorAll('input').forEach(i=>{ i.checked = true; });
+    root.querySelectorAll('.tab-checks').forEach(box=>{
+      box.classList.toggle('off', sel.value==='admin');
+      if(sel.value==='admin') box.querySelectorAll('input').forEach(i=>{ i.checked = true; });
+    });
   };
   sel.addEventListener('change', sync);
 }
 function userTabsLabel(u){
-  if(u.role==='admin') return 'All tabs';
-  const labels = ASSIGNABLE_PAGES().filter(p=>(u.pages||[]).includes(p.id)).map(p=>p.label);
-  return labels.length ? labels.join(', ') : 'No tabs';
+  if(u.role==='admin') return 'All tabs, all companies';
+  return COMPANIES.map(c=>{
+    const labels = ASSIGNABLE_PAGES().filter(p=>tabsFor(u, c.id).includes(p.id)).map(p=>p.label);
+    return `<b>${escapeHtml(c.name)}:</b> ${labels.length ? escapeHtml(labels.join(', ')) : 'no access'}`;
+  }).join('<br>');
 }
 const AUTH_ERRORS = {
   'auth/email-already-in-use':'An account with this email already exists.',
@@ -2026,7 +2106,7 @@ const AUTH_ERRORS = {
 function renderUsers(page){
   const users = [...state.users].sort((a,b)=>(b.active===true)-(a.active===true) || String(a.name||a.email).localeCompare(String(b.name||b.email)));
   page.innerHTML = `
-    <div class="pagehead"><div><h1>Users</h1><p>Add people who can sign in, and choose which tabs each one can open.</p></div></div>
+    <div class="pagehead"><div><h1>Users</h1><p>Add people who can sign in, and choose which companies and tabs each one can open. Users are shared by all companies.</p></div></div>
 
     <div class="panel" style="margin-bottom:18px;">
       <h3>Add user</h3>
@@ -2039,7 +2119,7 @@ function renderUsers(page){
           <div class="field"><label>Starting password</label><input name="password" type="text" required minlength="6" autocomplete="new-password" placeholder="At least 6 characters"></div>
           <div class="field"><label>Role</label><select name="role"><option value="user">User: only the tabs ticked below</option><option value="admin">Admin: all tabs, can manage users</option></select></div>
         </div>
-        <div class="field"><label>Tabs this user can open</label>${tabChecks([], false)}</div>
+        ${companyTabChecks(null, false)}
         <p id="u-add-error" style="color:var(--negative);font-size:13px;margin:0;min-height:18px;"></p>
         <button type="submit" class="btn btn-primary btn-sm" id="u-add-btn">Add user</button>
         <div class="hint">Give the person their email and starting password. They can change it with "Forgot password" on the sign-in screen.</div>
@@ -2055,7 +2135,7 @@ function renderUsers(page){
             <td>${escapeHtml(u.name||'—')}${u.uid===state.me.uid?' <span class="hint">(you)</span>':''}</td>
             <td>${escapeHtml(u.email||'')}</td>
             <td>${u.role==='admin'?'Admin':'User'}</td>
-            <td style="max-width:320px;">${escapeHtml(userTabsLabel(u))}</td>
+            <td style="max-width:360px;">${userTabsLabel(u)}</td>
             <td>${u.active===true?'<span class="pill pill-paid">Active</span>':'<span class="pill pill-pending">Disabled</span>'}</td>
             <td style="text-align:right;"><button class="btn btn-sm u-edit" data-uid="${escapeAttr(u.uid)}">Edit</button></td>
           </tr>`).join('') || '<tr><td colspan="6" class="empty">No users yet.</td></tr>'}
@@ -2073,12 +2153,12 @@ function renderUsers(page){
     err.textContent = '';
     const email = form.email.value.trim().toLowerCase();
     const role = form.role.value;
-    const pages = role==='admin' ? [] : readTabChecks(form);
-    if(role!=='admin' && !pages.length){ err.textContent = 'Tick at least one tab.'; return; }
+    const access = role==='admin' ? {} : readAccess(form);
+    if(role!=='admin' && !hasAnyTab(access)){ err.textContent = 'Tick at least one tab in one company.'; return; }
     btn.disabled = true;
     try{
       const uid = await fb.createUser(email, form.password.value);
-      await saveUser(uid, {email, name:form.name.value.trim(), role, pages, active:true, createdAt:new Date().toISOString()});
+      await saveUser(uid, {email, name:form.name.value.trim(), role, access, active:true, createdAt:new Date().toISOString()});
       showToast('User added: ' + email);
     }catch(ex){
       console.error(ex);
@@ -2109,7 +2189,7 @@ function openUserModal(uid){
             <option value="admin" ${u.role==='admin'?'selected':''}>Admin</option>
           </select></div>
         </div>
-        <div class="field"><label>Tabs this user can open</label>${tabChecks(u.pages||[], u.role==='admin')}</div>
+        ${companyTabChecks(u, u.role==='admin')}
         <div class="field"><label class="tab-check"><input type="checkbox" name="active" ${u.active===true?'checked':''} ${self?'disabled':''}> Account active (untick to block this person from signing in to the ledger)</label></div>
         ${self?'<div class="hint">You can\'t remove your own admin role or disable yourself.</div>':''}
         <p id="u-edit-error" style="color:var(--negative);font-size:13px;margin:0;min-height:18px;"></p>
@@ -2132,11 +2212,11 @@ function openUserModal(uid){
   form.addEventListener('submit', async e=>{
     e.preventDefault();
     const role = self ? 'admin' : form.role.value;
-    const pages = role==='admin' ? [] : readTabChecks(form);
+    const access = role==='admin' ? {} : readAccess(form);
     const active = self ? true : form.active.checked;
-    if(role!=='admin' && active && !pages.length){ overlay.querySelector('#u-edit-error').textContent = 'Tick at least one tab.'; return; }
+    if(role!=='admin' && active && !hasAnyTab(access)){ overlay.querySelector('#u-edit-error').textContent = 'Tick at least one tab in one company.'; return; }
     try{
-      await saveUser(uid, {name:form.name.value.trim(), role, pages, active});
+      await saveUser(uid, {name:form.name.value.trim(), role, access, active});
       overlay.remove();
       showToast('Saved');
     }catch(ex){ console.error(ex); overlay.querySelector('#u-edit-error').textContent = 'Could not save. ' + (ex.message||''); }
@@ -2379,6 +2459,9 @@ function showLogin(onSubmit, onReset){
     <div class="modal" style="max-width:380px;">
       <h2>Sign in</h2>
       <form id="login-form">
+        <div class="field"><label>Company</label><select name="company">
+          ${COMPANIES.map(c=>`<option value="${c.id}" ${c.id===currentCompany?'selected':''}>${escapeHtml(companyLabel(c))}</option>`).join('')}
+        </select></div>
         <div class="field"><label>Email</label><input required type="email" name="email" autocomplete="username"></div>
         <div class="field"><label>Password</label><input required type="password" name="password" autocomplete="current-password"></div>
         <p id="login-error" style="color:var(--negative);font-size:13px;margin:0;min-height:18px;"></p>
@@ -2391,6 +2474,11 @@ function showLogin(onSubmit, onReset){
   document.body.appendChild(overlay);
   const form = overlay.querySelector('#login-form');
   const err = overlay.querySelector('#login-error');
+  form.company.addEventListener('change', ()=>{
+    currentCompany = form.company.value;
+    rememberCompany(currentCompany);
+    showCompanyBrand();
+  });
   form.addEventListener('submit', async e=>{
     e.preventDefault();
     err.textContent = '';
@@ -2435,6 +2523,8 @@ window.fb = {
   createUser, resetPassword: email=>sendPasswordResetEmail(auth, email),
 };
 
+showCompanyBrand();
+document.getElementById('btn-switch-company').addEventListener('click', ()=>openCompanySwitcher());
 document.getElementById('btn-signout').addEventListener('click', async ()=>{
   await signOut(auth);
   location.reload();   // drops live listeners and in-memory data

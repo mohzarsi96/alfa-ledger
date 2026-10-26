@@ -1,7 +1,7 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Access comes from users/{uid}: {role: 'admin'|'user', pages: [tab ids], active}.
+    // Access comes from users/{uid}: {role: 'admin'|'user', access: {companyId: [tab ids]}, active}.
     // Signing in is not enough on its own: the account needs an active users doc,
     // which only an admin can create (from the Users tab).
     function me() {
@@ -15,9 +15,16 @@ service cloud.firestore {
     function admin() {
       return active() && me().role == 'admin';
     }
+    function tabs(co) {
+      return me().get('access', {}).get(co, []);
+    }
+    // Can open the company at all: admin, or at least one tab ticked for it.
+    function member(co) {
+      return active() && (me().role == 'admin' || tabs(co).size() > 0);
+    }
     // Writes follow the tabs that make them.
-    function tab(id) {
-      return active() && (me().role == 'admin' || id in me().pages);
+    function tab(co, id) {
+      return active() && (me().role == 'admin' || id in tabs(co));
     }
 
     match /users/{uid} {
@@ -25,34 +32,69 @@ service cloud.firestore {
       allow write: if admin();
     }
 
-    match /orders/{id} {
-      allow read: if active();
-      allow write: if tab('orders') || tab('incentives');
+    match /companies/{co} {
+      match /orders/{id} {
+        allow read: if member(co);
+        allow write: if tab(co, 'orders') || tab(co, 'incentives');
+      }
+
+      // Bulk upload on Sale Orders adds new salesmen/channels; editing them is Settings.
+      match /reps/{id} {
+        allow read: if member(co);
+        allow create: if tab(co, 'orders') || tab(co, 'settings');
+        allow update, delete: if tab(co, 'settings');
+      }
+      match /channels/{id} {
+        allow read: if member(co);
+        allow create: if tab(co, 'orders') || tab(co, 'settings');
+        allow update, delete: if tab(co, 'settings');
+      }
+
+      match /meta/months {
+        allow read: if member(co);
+        allow write: if tab(co, 'orders');
+      }
+      match /meta/settings {
+        allow read: if member(co);
+        allow write: if tab(co, 'settings');
+      }
+      match /meta/expenses {
+        allow read: if member(co);
+        allow write: if tab(co, 'expenses');
+      }
     }
 
-    // Bulk upload on Sale Orders adds new salesmen/channels; editing them is Settings.
+    // TRANSITION ONLY: the pre-companies app keeps Alfa's data at the root and
+    // uses users/{uid}.pages. Remove this block (and the root data) once the
+    // companies version is live and Alfa's data is synced to companies/alfa.
+    function oldTab(id) {
+      return active() && (me().role == 'admin' || id in me().get('pages', []));
+    }
+    match /orders/{id} {
+      allow read: if active();
+      allow write: if oldTab('orders') || oldTab('incentives');
+    }
     match /reps/{id} {
       allow read: if active();
-      allow create: if tab('orders') || tab('settings');
-      allow update, delete: if tab('settings');
+      allow create: if oldTab('orders') || oldTab('settings');
+      allow update, delete: if oldTab('settings');
     }
     match /channels/{id} {
       allow read: if active();
-      allow create: if tab('orders') || tab('settings');
-      allow update, delete: if tab('settings');
+      allow create: if oldTab('orders') || oldTab('settings');
+      allow update, delete: if oldTab('settings');
     }
-
     match /meta/months {
       allow read: if active();
-      allow write: if tab('orders');
+      allow write: if oldTab('orders');
     }
     match /meta/settings {
       allow read: if active();
-      allow write: if tab('settings');
+      allow write: if oldTab('settings');
     }
     match /meta/expenses {
       allow read: if active();
-      allow write: if tab('expenses');
+      allow write: if oldTab('expenses');
     }
   }
 }

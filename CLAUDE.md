@@ -13,11 +13,12 @@ Goal of this project: host it on Firebase (Firestore + Auth + Hosting) under the
 5. Keep the UI exactly as is (60-30-10 blue/slate/amber theme).
 
 ## Data model (Firestore)
+Two companies share the app and the users: Alfa Enterprises (`alfa`) and Muzaf Enterprise (`muzaf`), listed in `COMPANIES` in public/index.html. Company data lives under `companies/{companyId}/` (orders, reps, channels, meta); the paths below are relative to that. Picked on the sign-in screen, switched from the sidebar.
 - `orders/{id}`: ref, channel, rep, ledgerMonth ('YYYY-MM'), gstRate, grossSales, totalCost (null if pending),
   paymentStatus ('none'|'full'|'noteligible'), incentiveMonth ('YYYY-MM' or null; set when carried over),
   incentiveLocked (bool), notes
 - `reps/{code}` {code,name}; `channels/{code}` {code,name}
-- `users/{uid}` {email,name,role:'admin'|'user',pages:[tab ids],active}: access record. Admins add users and set tabs in the Users tab; firestore.rules require an active users doc and gate writes by tab. Recovery/first admin: `node scripts/set-access.mjs serviceAccount.json <email> admin`.
+- `users/{uid}` (root, shared) {email,name,role:'admin'|'user',access:{companyId:[tab ids]},active}: access record; no tabs for a company = no access to it. Admins add users and set tabs in the Users tab; firestore.rules require an active users doc and gate writes by tab. Recovery/first admin: `node scripts/set-access.mjs serviceAccount.json <email> admin`.
 - `meta/settings` {incentiveRate:5}; `meta/months` {list:[...]}; `meta/expenses` {salaries,rent,electricity,fuel,marketing,other}
 
 ## Business rules
