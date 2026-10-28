@@ -455,7 +455,7 @@ const STATUS_LABELS = {full:'Payment received', partial:'Pending', none:'Pending
    window.fb = {db, collection, doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, onSnapshot, query, limit}
    and calls startApp() once the user is signed in. */
 /* Companies share users and the app; each has its own data under companies/{id}/.
-   bizSplit: dashboard pies split Glass vs Lifting; without it they split by channel. */
+   bizSplit: dashboard pies and the Incentives filter split Glass vs Lifting; without it they split by channel. */
 const COMPANIES = [
   {id:'alfa',  name:'Alfa',  suffix:'Enterprises', bizSplit:true},
   {id:'muzaf', name:'Muzaf', suffix:'Enterprise'},
@@ -1797,9 +1797,12 @@ function renderIncentives(page){
   const repCodes = [...new Set(monthOrders.map(o=>o.rep))].sort((a,b)=>repName(a).localeCompare(repName(b)));
   if(incentiveRep !== 'all' && !repCodes.includes(incentiveRep)) incentiveRep = 'all';
   const repOrders = incentiveRep==='all' ? monthOrders : monthOrders.filter(o=>o.rep===incentiveRep);
-  const chCodes = [...new Set(repOrders.map(o=>o.channel))];
+  // filter by business (Glass / Lifting) where the company has that split, else by channel
+  const bizSplit = !!company().bizSplit;
+  const filterKey = o => bizSplit ? businessOf(o.channel) : o.channel;
+  const chCodes = bizSplit ? ['Glass','Lifting'].filter(b=>repOrders.some(o=>filterKey(o)===b)) : [...new Set(repOrders.map(o=>o.channel))];
   if(incentiveChannel && !chCodes.includes(incentiveChannel)) incentiveChannel = '';
-  const orders = (incentiveChannel ? repOrders.filter(o=>o.channel===incentiveChannel) : repOrders)
+  const orders = (incentiveChannel ? repOrders.filter(o=>filterKey(o)===incentiveChannel) : repOrders)
     .slice().sort((a,b)=>orderNum(a.ref)-orderNum(b.ref));
 
   const issued = orders.filter(o=>o.status==='full');
@@ -1842,7 +1845,7 @@ function renderIncentives(page){
       ${repCodes.map(r=>`<div class="month-tab ${incentiveRep===r?'active':''}" data-rep="${escapeAttr(r)}">${escapeHtml(repName(r))}</div>`).join('')}
     </div>
     <div class="toolbar">
-      <select id="f-inc-channel"><option value="">All channels</option>${chCodes.map(c=>`<option value="${escapeAttr(c)}" ${incentiveChannel===c?'selected':''}>${escapeHtml(chName(c))}</option>`).join('')}</select>
+      <select id="f-inc-channel"><option value="">${bizSplit?'All businesses':'All channels'}</option>${chCodes.map(c=>`<option value="${escapeAttr(c)}" ${incentiveChannel===c?'selected':''}>${escapeHtml(bizSplit?c:chName(c))}</option>`).join('')}</select>
       <div class="spacer"></div>
       ${incentiveMonth!=='all' && bulkable.length ? `<button class="btn btn-sm btn-danger" id="btn-bulk-ne">Mark all ${bulkable.length} as not eligible</button>` : ''}
       <span class="muted" style="font-size:12px;">${orders.length} order${orders.length!==1?'s':''} in view${carriedIn?` · ${carriedIn} carried over`:''}</span>
