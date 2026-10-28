@@ -62,6 +62,33 @@ service cloud.firestore {
         allow read: if member(co);
         allow write: if tab(co, 'expenses');
       }
+
+      // Purchasing: masters are edited on the Masters tab, POs on the Purchase Orders tab.
+      // Saving an ordered PO may also update a product's last price, and uploading PO items
+      // may add products that aren't in the master yet.
+      match /vendors/{id} {
+        allow read: if member(co);
+        allow write: if tab(co, 'masters');
+      }
+      match /hscodes/{id} {
+        allow read: if member(co);
+        allow write: if tab(co, 'masters');
+      }
+      match /products/{id} {
+        allow read: if member(co);
+        allow write: if tab(co, 'masters');
+        allow create: if tab(co, 'purchase');
+        allow update: if tab(co, 'purchase')
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['lastPrice', 'lastPo']);
+      }
+      match /purchaseOrders/{id} {
+        allow read: if member(co);
+        allow write: if tab(co, 'purchase');
+      }
+      match /meta/purchasing {
+        allow read: if member(co);
+        allow write: if tab(co, 'masters');
+      }
     }
   }
 }

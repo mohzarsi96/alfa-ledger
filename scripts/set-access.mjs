@@ -10,7 +10,7 @@ import { getFirestore } from 'firebase-admin/firestore';
 
 // Keep in sync with COMPANIES and the non-admin entries of PAGES in public/index.html.
 const COMPANIES = ['alfa', 'muzaf'];
-const ALL_TABS = ['dashboard', 'orders', 'pnl', 'channels', 'salesmen', 'incentives', 'monthly', 'expenses', 'settings'];
+const ALL_TABS = ['dashboard', 'orders', 'pnl', 'channels', 'salesmen', 'incentives', 'monthly', 'expenses', 'purchase', 'masters', 'settings'];
 
 const [keyPath, email, role] = process.argv.slice(2);
 if (!keyPath || !email || !['admin', 'user'].includes(role)) {

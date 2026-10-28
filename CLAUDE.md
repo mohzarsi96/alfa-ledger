@@ -20,6 +20,9 @@ Two companies share the app and the users: Alfa Enterprises (`alfa`) and Muzaf E
 - `reps/{code}` {code,name}; `channels/{code}` {code,name}
 - `users/{uid}` (root, shared) {email,name,role:'admin'|'user',access:{companyId:[tab ids]},active}: access record; no tabs for a company = no access to it. Admins add users and set tabs in the Users tab; firestore.rules require an active users doc and gate writes by tab. Recovery/first admin: `node scripts/set-access.mjs serviceAccount.json <email> admin`.
 - `meta/settings` {incentiveRate:5}; `meta/months` {list:[...]}; `meta/expenses` {salaries,rent,electricity,fuel,marketing,other}
+- Purchasing (Masters and Purchase Orders tabs): `vendors/{id}`, `products/{id}` {name,spec,hs,nw,gw,vol,lastPrice,lastPo}, `hscodes/{code}` {code,description,bcd,apta,sws,igst}, `meta/purchasing` {buyer,markups,chargeHeads,terms}, `purchaseOrders/{id}` {poNumber,date,status:'draft'|'ordered'|'received',vendorId,vendor (copy),rate,freight,insurance,claimApta,charges:[{label,amount}],lines:[{productId,item,spec,qty,price,nw,gw,vol,hs,sp:[override|null]}],terms,rates (HS rates frozen at save; drafts use the live master)}. Landed-cost maths is the PURCHASING-CALC block in public/index.html; `node scripts/seed-purchasing.mjs serviceAccount.json <company> <workbook.xlsx> [--write]` imports a costing workbook and checks that block against the workbook's numbers.
+
+Firestore runs with a persistent on-device cache (IndexedDB, multi-tab); sign-out clears it. Reopening within ~30 min only bills changed docs; the free plan's 50k reads/day is the limit to watch (every fresh open reads all of a company's orders).
 
 ## Business rules
 - Gross sales and total cost include GST. Gross profit = gross − cost. Net profit = gross profit / (1 + GST%/100). GST is 18% or 5% (blank in bulk upload = 0%).

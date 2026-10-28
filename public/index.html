@@ -291,6 +291,30 @@ td.ref .sub{font-size:11px;color:var(--ink-faint);font-family:'IBM Plex Sans',sa
 .toast{position:fixed;bottom:26px;right:26px;background:var(--ink);color:var(--bg);padding:12px 20px;border-radius:var(--radius-sm);font-size:13px;z-index:200;box-shadow:var(--shadow-lg);animation:riseIn .18s ease;}
 .icon-btn{background:transparent;border:none;color:var(--ink-faint);padding:5px;border-radius:var(--radius-sm);transition:background .12s ease,color .12s ease;}
 .icon-btn:hover{background:var(--negative-soft);color:var(--negative);}
+/* ---- purchasing ---- */
+.po-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:0 12px;}
+.po-grid .span2{grid-column:span 2;}
+.po-form{display:grid;grid-template-columns:1fr 1fr;gap:0 12px;}
+.po-form .full{grid-column:1/-1;}
+.po-table th{padding:9px 8px;}
+.po-table td{padding:5px 8px;}
+.po-table td.ref{min-width:190px;}
+.po-table input.cell,.po-table select.cell{padding:5px 7px;font-size:12.5px;}
+.po-table input.n{width:84px;text-align:right;font-family:'IBM Plex Mono',monospace;}
+.po-table input.sp{width:92px;}
+.row-new td,.charge-row.row-new{animation:rowFlash 1.8s ease;}
+@keyframes rowFlash{0%,40%{background:var(--accent-soft);}100%{background:transparent;}}
+.po-kpis{grid-template-columns:repeat(7,1fr);gap:10px;}
+.po-kpis .kpi{padding:14px 12px 12px;}
+.po-kpis .value{font-size:16px;}
+.stamp-preview{min-height:110px;display:flex;align-items:center;justify-content:center;border:1px dashed var(--border);border-radius:var(--radius-sm);background:#fff;padding:8px;}
+.stamp-preview img{max-height:120px;max-width:100%;}
+h3.po-sec{margin:0;font-size:15px;font-weight:600;color:var(--accent-ink);}
+.charge-row{display:grid;grid-template-columns:1fr 130px auto;gap:8px;align-items:center;}
+.charge-row input.n{text-align:right;font-family:'IBM Plex Mono',monospace;}
+.check-inline{display:flex;align-items:center;gap:8px;margin:2px 0 0;font-size:13px;color:var(--ink);font-weight:400;cursor:pointer;}
+.check-inline input{width:auto;}
+@media (max-width:900px){ .po-kpis{grid-template-columns:repeat(2,1fr);} .po-grid{grid-template-columns:1fr 1fr;} .po-form{grid-template-columns:1fr;} }
 
 @media (max-width:900px){
   #sidebar{position:fixed;left:0;top:0;bottom:0;transform:translateX(-100%);transition:transform .2s;z-index:150;}
@@ -376,6 +400,8 @@ let state = {
   ready: false,
   me: null,         // signed-in user's users/{uid} doc: {email,name,role,access,active}
   users: [],        // all users (admin only)
+  vendors: [], products: [], hscodes: [], pos: [],  // purchasing masters and purchase orders
+  purchasing: {},   // meta/purchasing: buyer details, markups, default charges and terms
 };
 let db = null;
 let currentPage = 'dashboard';
@@ -652,8 +678,10 @@ function subscribeAll(){
     state.me = {uid:state.me.uid, ...snap.data()};
     if(!hasCompany(currentCompany)){ location.reload(); return; }
     showCompanyBrand();
+    subscribePurchasing();
     render();
   });
+  subscribePurchasing();
 
   if(isAdmin()){
     fb.onSnapshot(fb.collection(fb.db, 'users'), snap=>{
@@ -775,6 +803,8 @@ const PAGES = [
   {id:'incentives', label:'Incentives', icon:'M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V6m0 10v2m0-2c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z'},
   {id:'monthly', label:'Monthly Summary', icon:'M8 7V3m8 4V3M4 11h16M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z'},
   {id:'expenses', label:'Expenses & True NP', icon:'M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z'},
+  {id:'purchase', label:'Purchase Orders', icon:'M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z'},
+  {id:'masters', label:'Masters', icon:'M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4'},
   {id:'settings', label:'Settings', icon:'M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z M15 12a3 3 0 11-6 0 3 3 0 016 0z'},
   {id:'users', label:'Users', adminOnly:true, icon:'M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z'},
 ];
@@ -820,6 +850,8 @@ function render(){
   else if(currentPage==='incentives') renderIncentives(page);
   else if(currentPage==='monthly') renderMonthly(page);
   else if(currentPage==='expenses') renderExpenses(page);
+  else if(currentPage==='purchase') renderPurchase(page);
+  else if(currentPage==='masters') renderMasters(page);
   else if(currentPage==='settings') renderSettings(page);
   else if(currentPage==='users') renderUsers(page);
   else page.innerHTML = '<div class="empty">No tabs have been assigned to your account yet. Ask the admin.</div>';
@@ -2076,6 +2108,1248 @@ function renderSettings(page){
 }
 
 /* ============================================================
+   PURCHASING
+   Masters and import purchase orders, per company:
+   companies/{co}/vendors, products, hscodes (doc id = HS code), purchaseOrders, meta/purchasing.
+   Landed cost follows the import costing workbook:
+     FOB = qty × price; CIF = FOB + freight + insurance (both shared by FOB value)
+     BCD = CIF₹ × BCD% × (1 − APTA% when claimed); SWS = BCD × SWS%
+     assessable = CIF₹ + BCD + SWS; IGST = assessable × IGST% (input credit, not a cost)
+     landed basic cost = assessable + other charges (shared by assessable value); total cost = landed × (1 + GST%)
+     selling price = unit landed × (1 + markup), rounded up to the nearest ₹5
+   ============================================================ */
+// PURCHASING-CALC-START (scripts/seed-purchasing.mjs runs this block against the Excel numbers)
+const PO_DEFAULTS = {
+  buyer:{name:'', tagline:'', address:'', iec:'', gstin:'', pan:'', phone:'', email:''},
+  markups:[20,25,30],
+  chargeHeads:['Shipping','Agency','Exam','Docs','CFS','Transport','Forklift','CMC','Empty','Stamp duty','Unloading','Misc'],
+  terms:[
+    '1. All prices are in USD. Payment as per the payment terms above.',
+    '2. Goods to be packed in export-standard cartons / wooden crates suitable for sea freight.',
+    '3. All items to meet the specifications listed. Supplier to provide test certificates if required.',
+    '4. Delivery schedule to be confirmed upon receipt of order confirmation and deposit.',
+    '5. This Purchase Order constitutes a binding contract upon written acceptance by the Supplier.',
+  ].join('\n'),
+  // PO for customs: defaults for a new PO, and the company stamp / signature image (data URL)
+  priceBasis:'CIF Nhava Sheva', shipment:'', packing:'', stamp:'',
+};
+function poSettings(){
+  const p = state.purchasing || {};
+  return {...PO_DEFAULTS, ...p, buyer:{...PO_DEFAULTS.buyer, ...(p.buyer||{})}};
+}
+const toNum = v => { const n = parseFloat(v); return isNaN(n) ? 0 : n; };
+const isBlank = v => v===null || v===undefined || v==='';
+const ceil5 = n => Math.ceil(n/5 - 1e-9) * 5;
+const hsByCode = code => state.hscodes.find(h=>h.id===String(code||'')) || null;
+
+/* Drafts use the HS master's current rates; a saved non-draft PO keeps the rates it was saved with. */
+function poRate(po, code){
+  const live = hsByCode(code), saved = (po.rates||{})[code];
+  return po.status==='draft' ? (live || saved || null) : (saved || live || null);
+}
+function ratesFor(po){
+  const out = po.status==='draft' ? {} : {...(po.rates||{})};
+  (po.lines||[]).forEach(l=>{
+    const h = hsByCode(l.hs);
+    if(l.hs && h && !out[l.hs]) out[l.hs] = {bcd:toNum(h.bcd), apta:toNum(h.apta), sws:toNum(h.sws), igst:toNum(h.igst)};
+  });
+  return out;
+}
+function computePO(po){
+  const lines = po.lines || [];
+  const markups = poSettings().markups;
+  const fx = toNum(po.rate), shipping = toNum(po.freight) + toNum(po.insurance);
+  const fobs = lines.map(l=>toNum(l.qty)*toNum(l.price));
+  const totFob = fobs.reduce((a,b)=>a+b,0);
+  const rows = lines.map((l,i)=>{
+    const r = poRate(po, l.hs);
+    const fob = fobs[i];
+    const cifUsd = fob + (totFob ? shipping*fob/totFob : 0);
+    const cifInr = cifUsd * fx;
+    const apta = (po.claimApta && r) ? toNum(r.apta) : 0;
+    const bcd = r ? cifInr * toNum(r.bcd)/100 * (1 - apta/100) : 0;
+    const sws = r ? bcd * toNum(r.sws)/100 : 0;
+    const assess = cifInr + bcd + sws;
+    const igst = r ? assess * toNum(r.igst)/100 : 0;
+    return {fob, cifUsd, cifInr, apta, bcd, sws, assess, igst, gstPct: r ? toNum(r.igst) : 0, noRate:!r};
+  });
+  const other = (po.charges||[]).reduce((t,c)=>t+toNum(c.amount),0);
+  const totAssess = rows.reduce((t,x)=>t+x.assess,0);
+  rows.forEach((x,i)=>{
+    const l = lines[i], qty = toNum(l.qty);
+    x.landed = totAssess ? x.assess * (1 + other/totAssess) : 0;
+    x.unit = qty ? x.landed/qty : 0;
+    x.total = x.landed * (1 + x.gstPct/100);   // landed basic cost + the item's GST
+    x.spSet = markups.map((m,k)=>!isBlank((l.sp||[])[k]));
+    x.sp = markups.map((m,k)=>x.spSet[k] ? toNum(l.sp[k]) : ceil5(x.unit * (1 + toNum(m)/100)));
+  });
+  const sum = f => rows.reduce((t,x)=>t+f(x),0);
+  const lsum = f => lines.reduce((t,l)=>t+f(l),0);
+  return {rows, markups, other, totals:{
+    qty:lsum(l=>toNum(l.qty)), fob:totFob,
+    nw:lsum(l=>toNum(l.nw)*toNum(l.qty)), gw:lsum(l=>toNum(l.gw)*toNum(l.qty)), vol:lsum(l=>toNum(l.vol)*toNum(l.qty)),
+    cifUsd:sum(x=>x.cifUsd), cifInr:sum(x=>x.cifInr), bcd:sum(x=>x.bcd), sws:sum(x=>x.sws),
+    assess:totAssess, igst:sum(x=>x.igst), landed:sum(x=>x.landed), total:sum(x=>x.total),
+  }};
+}
+// PURCHASING-CALC-END
+
+const PO_STATUS = {draft:{label:'Draft', pill:'pill-pending'}, ordered:{label:'Ordered', pill:'pill-partial'}, received:{label:'Received', pill:'pill-paid'}};
+const fmtFx = n => (toNum(n)<0?'−':'') + Math.abs(toNum(n)).toLocaleString('en-US',{minimumFractionDigits:2, maximumFractionDigits:2});
+const fmtQty = (n, d=2) => toNum(n).toLocaleString('en-IN',{maximumFractionDigits:d});
+const vendorById = id => state.vendors.find(v=>v.id===id) || null;
+const productLabel = p => p.spec ? p.name + ' — ' + p.spec : (p.name||'');
+const byText = f => (a,b)=>String(f(a)||'').localeCompare(String(f(b)||''), undefined, {numeric:true});
+function todayISO(){
+  const d = new Date();
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+}
+/* Vendor shown on a PO: live record while drafting, the copy saved with it afterwards. */
+function poVendor(po){
+  const live = vendorById(po.vendorId), saved = po.vendor && po.vendor.name ? po.vendor : null;
+  return (po.status==='draft' ? (live || saved) : (saved || live)) || {};
+}
+
+let purchasingSubscribed = false;
+function subscribePurchasing(){
+  if(purchasingSubscribed || !(canSee('purchase') || canSee('masters'))) return;
+  purchasingSubscribed = true;
+  const list = (name, key) => fb.onSnapshot(colRef(name), snap=>{
+    state[key] = snap.docs.map(d=>({id:d.id, ...d.data()}));
+    render();
+  }, err=>console.error('load '+name+' failed', err));
+  list('vendors','vendors'); list('products','products'); list('hscodes','hscodes'); list('purchaseOrders','pos');
+  fb.onSnapshot(docRef('meta/purchasing'), snap=>{
+    state.purchasing = snap.exists() ? snap.data() : {};
+    render();
+  }, err=>console.error('load PO settings failed', err));
+}
+
+/* ---------------- Purchase Orders tab ---------------- */
+let poOpen = null;   // PO in the editor: {id (null until first save), draft, dirty}
+const poFilters = {q:'', status:''};
+window.addEventListener('beforeunload', e=>{ if(poOpen && poOpen.dirty){ e.preventDefault(); e.returnValue=''; } });
+
+function renderPurchase(page){
+  if(poOpen) return renderPoEditor(page);
+  const q = poFilters.q.toLowerCase();
+  const pos = state.pos
+    .filter(p=>(!poFilters.status || (p.status||'draft')===poFilters.status) && (!q || [p.poNumber, poVendor(p).name].some(s=>String(s||'').toLowerCase().includes(q))))
+    .sort((a,b)=>String(b.date||'').localeCompare(String(a.date||'')) || byText(p=>p.poNumber)(b,a));
+  page.innerHTML = `
+    <div class="pagehead">
+      <div><h1>Purchase Orders</h1><p>Import POs with landed cost: freight, customs duty and clearing charges spread across the items, and selling prices from your markups.</p></div>
+      <div class="actions"><button class="btn btn-primary" id="po-new">+ New PO</button></div>
+    </div>
+    <div class="toolbar">
+      <input type="search" id="po-q" placeholder="Search PO number or vendor…" value="${escapeAttr(poFilters.q)}">
+      <select id="po-status"><option value="">All statuses</option>${Object.entries(PO_STATUS).map(([k,s])=>`<option value="${k}" ${poFilters.status===k?'selected':''}>${s.label}</option>`).join('')}</select>
+      <div class="spacer"></div>
+      <span class="muted" style="font-size:12px;">${pos.length} of ${state.pos.length} POs</span>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>PO number</th><th>Vendor</th><th class="num">Items</th><th class="num">Qty</th><th class="num">FOB</th><th class="num">Landed basic cost</th><th>Status</th></tr></thead>
+        <tbody>
+        ${pos.map(p=>{
+          const c = computePO(p), st = PO_STATUS[p.status] || PO_STATUS.draft;
+          return `<tr data-id="${escapeAttr(p.id)}" style="cursor:pointer;">
+            <td class="ref">${escapeHtml(p.poNumber||'—')}<div class="sub">${escapeHtml(fmtDate(p.date))}</div></td>
+            <td>${escapeHtml(poVendor(p).name||'—')}</td>
+            <td class="num">${(p.lines||[]).length}</td>
+            <td class="num">${fmtQty(c.totals.qty)}</td>
+            <td class="num">${escapeHtml(p.currency||'USD')} ${fmtFx(c.totals.fob)}</td>
+            <td class="num">${fmtMoney(c.totals.landed)}</td>
+            <td><span class="pill ${st.pill}">${st.label}</span></td>
+          </tr>`;
+        }).join('') || `<tr><td colspan="7" class="empty">${state.pos.length ? 'No POs match.' : 'No purchase orders yet. Use "+ New PO" to make one.'}</td></tr>`}
+        </tbody>
+      </table>
+    </div>`;
+  document.getElementById('po-new').addEventListener('click', ()=>openPo(null));
+  document.getElementById('po-q').addEventListener('input', e=>{ poFilters.q = e.target.value; renderPurchase(page); const el = document.getElementById('po-q'); el.focus(); el.setSelectionRange(el.value.length, el.value.length); });
+  document.getElementById('po-status').addEventListener('change', e=>{ poFilters.status = e.target.value; renderPurchase(page); });
+  page.querySelectorAll('tbody tr[data-id]').forEach(tr=>tr.addEventListener('click', ()=>openPo(tr.dataset.id)));
+}
+
+function newPoDraft(){
+  const s = poSettings(), y = new Date().getFullYear();
+  const seq = Math.max(0, ...state.pos.map(p=>{ const m = String(p.poNumber||'').match(new RegExp('^PO-'+y+'-(\\d+)$')); return m ? +m[1] : 0; }));
+  return {
+    poNumber:`PO-${y}-${String(seq+1).padStart(3,'0')}`, date:todayISO(), status:'draft',
+    vendorId:'', paymentTerms:'', currency:'USD', deliveryTerms:'FOB', port:'',
+    rate:'', freight:0, insurance:0, claimApta:true,
+    charges:s.chargeHeads.map(label=>({label, amount:0})), lines:[], terms:s.terms,
+    piNumber:'', piDate:'', priceBasis:s.priceBasis, shipment:s.shipment, packing:s.packing,
+  };
+}
+function openPo(id){
+  const src = id ? state.pos.find(p=>p.id===id) : newPoDraft();
+  if(!src) return;
+  const draft = JSON.parse(JSON.stringify(src));
+  delete draft.id;
+  poOpen = {id, draft, dirty:!id};
+  render();
+  window.scrollTo(0,0);
+}
+function closePo(){
+  const leave = ()=>{ poOpen = null; render(); window.scrollTo(0,0); };
+  if(poOpen && poOpen.dirty) showConfirm('Leave without saving?', 'Your changes to this PO will be lost.', leave, 'Discard changes');
+  else leave();
+}
+const blankLine = () => ({productId:'', item:'', spec:'', qty:'', price:'', nw:'', gw:'', vol:'', hs:'', sp:[]});
+
+/* Re-render after an edit, keeping the scroll positions and the field the user moved to.
+   focusKey names a newly added row's field: that row is scrolled into view and highlighted. */
+function rerenderPo(page, focusKey){
+  setTimeout(()=>{
+    const fk = focusKey || (document.activeElement && document.activeElement.dataset ? document.activeElement.dataset.fk : null);
+    const y = window.scrollY;
+    const sx = [...page.querySelectorAll('.table-wrap')].map(w=>w.scrollLeft);
+    renderPoEditor(page);
+    window.scrollTo(0, y);
+    page.querySelectorAll('.table-wrap').forEach((w,i)=>{ w.scrollLeft = sx[i] || 0; });
+    const el = fk ? page.querySelector(`[data-fk="${CSS.escape(fk)}"]`) : null;
+    if(!el) return;
+    el.focus({preventScroll:true});
+    if(focusKey){
+      const row = el.closest('tr, .charge-row');
+      const wrap = el.closest('.table-wrap');
+      if(wrap) wrap.scrollLeft = 0;
+      row.classList.add('row-new');
+      row.scrollIntoView({block:'center', behavior:'smooth'});
+    }
+  }, 0);
+}
+
+function renderPoEditor(page){
+  const d = poOpen.draft, c = computePO(d), t = c.totals, cur = d.currency || 'USD';
+  const st = PO_STATUS[d.status] || PO_STATUS.draft;
+  const products = state.products.slice().sort(byText(productLabel));
+  const prodOpts = l => {
+    const found = products.some(p=>p.id===l.productId);
+    return `<option value="">Choose product…</option>`
+      + (l.productId && !found ? `<option value="${escapeAttr(l.productId)}" selected>${escapeHtml(productLabel({name:l.item||'(removed product)'}))}</option>` : '')
+      + products.map(p=>`<option value="${escapeAttr(p.id)}" ${p.id===l.productId?'selected':''}>${escapeHtml(productLabel(p))}</option>`).join('');
+  };
+  const hsOpts = sel => `<option value="">—</option>`
+    + state.hscodes.map(h=>h.id).sort().map(code=>`<option ${sel===code?'selected':''}>${escapeHtml(code)}</option>`).join('')
+    + (sel && !hsByCode(sel) ? `<option selected>${escapeHtml(sel)}</option>` : '');
+  const field = (k, label, type, cls) => `<div class="field ${cls||''}"><label>${label}</label><input data-fk="h-${k}" data-h="${k}" type="${type||'text'}" ${type==='number'?'step="any"':''} value="${escapeAttr(d[k]??'')}"></div>`;
+  const lineIn = (i, k, extra) => `data-fk="l${i}-${k}" data-li="${i}" data-lf="${k}" ${extra||''}`;
+  const numIn = (i, k, l) => `<input class="cell n" type="number" step="any" ${lineIn(i,k)} value="${escapeAttr(l[k]??'')}">`;
+  const noRate = [...new Set(d.lines.filter((l,i)=>c.rows[i].noRate).map(l=>l.hs || 'no HS code'))];
+
+  page.innerHTML = `
+    <div class="pagehead">
+      <div><h1>${escapeHtml(d.poNumber || 'New purchase order')}</h1>
+        <p>${escapeHtml(poVendor(d).name || 'No vendor chosen')} · <span class="pill ${st.pill}">${st.label}</span>${poOpen.dirty ? ' · <b>Unsaved changes</b>' : ''}</p></div>
+      <div class="actions">
+        <button class="btn" id="po-back">← All POs</button>
+        <button class="btn" id="po-print">Supplier PO</button>
+        <button class="btn" id="po-customs">PO for customs</button>
+        <button class="btn" id="po-xlsx">Costing sheet (Excel)</button>
+        ${poOpen.id ? '<button class="btn btn-danger" id="po-del">Delete</button>' : ''}
+        <button class="btn btn-primary" id="po-save">Save</button>
+      </div>
+    </div>
+
+    <div class="panel" style="margin-bottom:18px;">
+      <h3>Order details</h3>
+      <div class="po-grid">
+        ${field('poNumber','PO number')}
+        ${field('date','Date','date')}
+        <div class="field"><label>Status</label><select data-fk="h-status" data-h="status">${Object.entries(PO_STATUS).map(([k,s])=>`<option value="${k}" ${d.status===k?'selected':''}>${s.label}</option>`).join('')}</select></div>
+        <div class="field"><label>Vendor</label><select data-fk="h-vendorId" data-h="vendorId"><option value="">Choose vendor…</option>${state.vendors.slice().sort(byText(v=>v.name)).map(v=>`<option value="${escapeAttr(v.id)}" ${d.vendorId===v.id?'selected':''}>${escapeHtml(v.name)}</option>`).join('')}</select></div>
+        ${field('paymentTerms','Payment terms','text','span2')}
+        ${field('deliveryTerms','Delivery terms')}
+        ${field('port','Shipment port')}
+        ${field('currency','Currency')}
+        ${field('rate',`Exchange rate (₹ per ${escapeHtml(cur)})`,'number')}
+        ${field('freight',`Freight (${escapeHtml(cur)})`,'number')}
+        ${field('insurance',`Insurance (${escapeHtml(cur)})`,'number')}
+      </div>
+      <label class="check-inline"><input type="checkbox" data-fk="h-claimApta" data-h="claimApta" ${d.claimApta?'checked':''}> Claim APTA concession: reduces BCD by each HS code's APTA % (needs a certificate of origin)</label>
+      <h3 style="margin-top:20px;">For the PO for customs</h3>
+      <div class="po-grid">
+        ${field('piNumber','Proforma invoice / S/C no.')}
+        ${field('piDate','Invoice date','date')}
+        ${field('priceBasis','Price basis','text','span2')}
+        ${field('shipment','Shipment','text','span2')}
+        ${field('packing','Packing','text','span2')}
+      </div>
+    </div>
+
+    <div class="kpi-row po-kpis">
+      <div class="kpi"><div class="label">FOB value</div><div class="value num">${escapeHtml(cur)} ${fmtFx(t.fob)}</div><div class="sub">${fmtQty(t.qty,0)} units · ${fmtQty(t.gw)} kg GW · ${fmtQty(t.vol,3)} m³</div></div>
+      <div class="kpi"><div class="label">CIF value</div><div class="value num">${escapeHtml(cur)} ${fmtFx(t.cifUsd)}</div><div class="sub">incl. freight ${escapeHtml(cur)} ${fmtFx(d.freight)}${toNum(d.insurance) ? ` + insurance ${fmtFx(d.insurance)}` : ""} · ${fmtMoney(t.cifInr)}</div></div>
+      <div class="kpi"><div class="label">Customs duty</div><div class="value num">${fmtMoney(t.bcd + t.sws)}</div><div class="sub">BCD ${fmtMoney(t.bcd)} · SWS ${fmtMoney(t.sws)}</div></div>
+      <div class="kpi"><div class="label">IGST</div><div class="value num">${fmtMoney(t.igst)}</div><div class="sub">input credit, not in cost</div></div>
+      <div class="kpi"><div class="label">Total duty payable</div><div class="value num">${fmtMoney(t.bcd + t.sws + t.igst)}</div><div class="sub">customs duty + IGST</div></div>
+      <div class="kpi"><div class="label">Landed basic cost</div><div class="value num">${fmtMoney(t.landed)}</div><div class="sub">incl. ${fmtMoney(c.other)} other charges</div></div>
+      <div class="kpi hero"><div class="label">Total cost</div><div class="value num accent">${fmtMoney(t.total)}</div><div class="sub">landed basic cost + GST</div></div>
+    </div>
+    ${toNum(d.rate) ? '' : `<div class="section-note">Enter the exchange rate to work out the rupee costs.</div>`}
+    ${noRate.length ? `<div class="section-note">No duty rates for ${escapeHtml(noRate.join(', '))}. Add ${noRate.length>1?'them':'it'} in Masters → HS codes; until then duty on ${noRate.length>1?'those items':'that item'} counts as 0.</div>` : ''}
+
+    <div class="toolbar" style="margin-bottom:8px;"><h3 class="po-sec">Items</h3><div class="spacer"></div><button class="btn btn-sm" id="po-items-template">Download template</button><button class="btn btn-sm" id="po-items-upload">Upload items</button><input type="file" id="po-items-file" accept=".xlsx,.xls,.csv" hidden><button class="btn btn-sm po-add-line">+ Add item</button></div>
+    <div class="table-wrap po-table" style="margin-bottom:22px;">
+      <table>
+        <thead><tr><th>#</th><th>Product &amp; description</th><th class="num">Qty</th><th class="num">Unit price (${escapeHtml(cur)})</th><th class="num">Amount (${escapeHtml(cur)})</th>
+          <th class="num">NW/unit (kg)</th><th class="num">GW/unit (kg)</th><th class="num">Vol/unit (m³)</th><th class="num">Total NW</th><th class="num">Total GW</th><th class="num">Total vol</th><th>HS code</th><th></th></tr></thead>
+        <tbody>
+        ${d.lines.map((l,i)=>`<tr>
+          <td class="muted">${i+1}</td>
+          <td><select class="cell" ${lineIn(i,'productId')} style="min-width:360px;">${prodOpts(l)}</select></td>
+          <td>${numIn(i,'qty',l)}</td>
+          <td>${numIn(i,'price',l)}</td>
+          <td class="num">${fmtFx(c.rows[i].fob)}</td>
+          <td>${numIn(i,'nw',l)}</td>
+          <td>${numIn(i,'gw',l)}</td>
+          <td>${numIn(i,'vol',l)}</td>
+          <td class="num">${fmtQty(toNum(l.nw)*toNum(l.qty))}</td>
+          <td class="num">${fmtQty(toNum(l.gw)*toNum(l.qty))}</td>
+          <td class="num">${fmtQty(toNum(l.vol)*toNum(l.qty),3)}</td>
+          <td><select class="cell" ${lineIn(i,'hs')}>${hsOpts(l.hs)}</select></td>
+          <td><button class="icon-btn po-del-line" data-li="${i}" title="Remove item">✕</button></td>
+        </tr>`).join('') || `<tr><td colspan="13" class="empty">No items yet. Use "+ Add item" or "Upload items".</td></tr>`}
+        </tbody>
+        ${d.lines.length ? `<tfoot><tr class="tot-row">
+          <td colspan="2">Total · ${d.lines.length} item${d.lines.length!==1?'s':''}</td>
+          <td class="num">${fmtQty(t.qty)}</td><td></td><td class="num">${fmtFx(t.fob)}</td><td></td><td></td><td></td>
+          <td class="num">${fmtQty(t.nw)}</td><td class="num">${fmtQty(t.gw)}</td><td class="num">${fmtQty(t.vol,3)}</td><td></td><td></td>
+        </tr></tfoot>` : ''}
+      </table>
+    </div>
+    ${d.lines.length ? '<div style="margin:-12px 0 22px;"><button class="btn btn-sm po-add-line">+ Add item</button></div>' : ''}
+
+    <div class="toolbar" style="margin-bottom:8px;"><h3 class="po-sec">Costing</h3><div class="spacer"></div><span class="muted" style="font-size:12px;">Selling prices are rounded up to ₹5. Type over one to set it by hand; clear the box to go back.</span></div>
+    <div class="table-wrap po-table" style="margin-bottom:22px;">
+      <table>
+        <thead><tr><th>#</th><th>Item</th><th class="num">Qty</th><th>HS code</th><th class="num">APTA %</th><th class="num">CIF (${escapeHtml(cur)})</th><th class="num">CIF (₹)</th><th class="num">BCD</th><th class="num">SWS</th>
+          <th class="num">IGST assessable</th><th class="num">IGST</th><th class="num">Landed basic cost</th><th class="num">Total cost (incl. GST)</th><th class="num">Unit cost</th>${c.markups.map(m=>`<th class="num">SP @ ${escapeHtml(m)}%</th>`).join('')}</tr></thead>
+        <tbody>
+        ${d.lines.map((l,i)=>{ const x = c.rows[i]; return `<tr>
+          <td class="muted">${i+1}</td>
+          <td class="ref">${escapeHtml(l.item||'—')}${l.spec?`<div class="sub">${escapeHtml(l.spec)}</div>`:''}</td>
+          <td class="num">${fmtQty(l.qty)}</td>
+          <td>${escapeHtml(l.hs||'—')}</td>
+          <td class="num">${x.apta ? fmtQty(x.apta)+'%' : '—'}</td>
+          <td class="num">${fmtFx(x.cifUsd)}</td>
+          <td class="num">${fmtMoney(x.cifInr)}</td>
+          <td class="num">${fmtMoney(x.bcd)}</td>
+          <td class="num">${fmtMoney(x.sws)}</td>
+          <td class="num">${fmtMoney(x.assess)}</td>
+          <td class="num">${fmtMoney(x.igst)}</td>
+          <td class="num">${fmtMoney(x.landed)}</td>
+          <td class="num">${fmtMoney(x.total)}</td>
+          <td class="num"><b>${fmtMoney2(x.unit)}</b></td>
+          ${x.sp.map((v,k)=>`<td><input class="cell n sp" type="number" step="any" data-fk="l${i}-sp${k}" data-li="${i}" data-sp="${k}" value="${v}" title="${x.spSet[k]?'Set by hand: clear the box to use the markup price':'Markup price'}"></td>`).join('')}
+        </tr>`; }).join('') || `<tr><td colspan="${14+c.markups.length}" class="empty">Add items to see the costing.</td></tr>`}
+        </tbody>
+        ${d.lines.length ? `<tfoot><tr class="tot-row">
+          <td colspan="2">Total</td><td class="num">${fmtQty(t.qty)}</td><td></td><td></td>
+          <td class="num">${fmtFx(t.cifUsd)}</td><td class="num">${fmtMoney(t.cifInr)}</td><td class="num">${fmtMoney(t.bcd)}</td><td class="num">${fmtMoney(t.sws)}</td>
+          <td class="num">${fmtMoney(t.assess)}</td><td class="num">${fmtMoney(t.igst)}</td><td class="num">${fmtMoney(t.landed)}</td><td class="num">${fmtMoney(t.total)}</td><td></td>${c.markups.map(()=>'<td></td>').join('')}
+        </tr></tfoot>` : ''}
+      </table>
+    </div>
+
+    <div class="chart-row" style="align-items:flex-start;">
+      <div class="panel">
+        <h3>Other charges (₹)</h3>
+        <div class="settings-list">
+          ${(d.charges||[]).map((ch,i)=>`<div class="charge-row">
+            <input data-fk="c${i}-label" data-ci="${i}" data-cf="label" value="${escapeAttr(ch.label||'')}">
+            <input class="n" type="number" step="any" data-fk="c${i}-amount" data-ci="${i}" data-cf="amount" value="${escapeAttr(ch.amount??'')}">
+            <button class="icon-btn po-del-charge" data-ci="${i}" title="Remove charge">✕</button>
+          </div>`).join('')}
+        </div>
+        <div class="exp-total"><span>Total</span><span class="num">${fmtMoney(c.other)}</span></div>
+        <button class="btn btn-sm" id="po-add-charge" style="margin-top:10px;">+ Add charge</button>
+        <div class="hint">Shared across the items in proportion to their IGST assessable value.</div>
+      </div>
+      <div class="panel">
+        <h3>Terms &amp; conditions</h3>
+        <textarea data-fk="h-terms" data-h="terms" rows="9">${escapeHtml(d.terms||'')}</textarea>
+        <div class="hint">Printed on the supplier PO.</div>
+      </div>
+    </div>`;
+
+  const edit = (fn, focusKey) => { fn(); poOpen.dirty = true; rerenderPo(page, focusKey); };
+  page.querySelectorAll('[data-h]').forEach(el=>el.addEventListener('change', ()=>edit(()=>{
+    const k = el.dataset.h;
+    if(el.type==='checkbox') d[k] = el.checked;
+    else if(['rate','freight','insurance'].includes(k)) d[k] = el.value==='' ? '' : toNum(el.value);
+    else d[k] = el.value;
+    if(k==='vendorId'){
+      const v = vendorById(d.vendorId);
+      if(v){ d.paymentTerms = v.paymentTerms || d.paymentTerms; d.currency = v.currency || d.currency; d.port = v.port || d.port; }
+    }
+  })));
+  page.querySelectorAll('[data-lf]').forEach(el=>el.addEventListener('change', ()=>edit(()=>{
+    const l = d.lines[+el.dataset.li], k = el.dataset.lf;
+    if(k==='productId'){
+      l.productId = el.value;
+      const p = state.products.find(x=>x.id===el.value);
+      if(p){
+        Object.assign(l, {item:p.name||'', spec:p.spec||'', nw:p.nw??'', gw:p.gw??'', vol:p.vol??'', hs:p.hs||''});
+        if(isBlank(l.price) && !isBlank(p.lastPrice)) l.price = p.lastPrice;
+      }
+    }
+    else if(['qty','price','nw','gw','vol'].includes(k)) l[k] = el.value==='' ? '' : toNum(el.value);
+    else l[k] = el.value;
+  })));
+  page.querySelectorAll('[data-sp]').forEach(el=>el.addEventListener('change', ()=>edit(()=>{
+    const l = d.lines[+el.dataset.li], k = +el.dataset.sp;
+    l.sp = l.sp || [];
+    while(l.sp.length <= k) l.sp.push(null);
+    l.sp[k] = el.value==='' ? null : toNum(el.value);
+  })));
+  page.querySelectorAll('[data-cf]').forEach(el=>el.addEventListener('change', ()=>edit(()=>{
+    const ch = d.charges[+el.dataset.ci];
+    ch[el.dataset.cf] = el.dataset.cf==='amount' ? (el.value==='' ? '' : toNum(el.value)) : el.value;
+  })));
+  page.querySelectorAll('.po-del-line').forEach(b=>b.addEventListener('click', ()=>edit(()=>{ d.lines.splice(+b.dataset.li, 1); })));
+  page.querySelectorAll('.po-del-charge').forEach(b=>b.addEventListener('click', ()=>edit(()=>{ d.charges.splice(+b.dataset.ci, 1); })));
+  page.querySelectorAll('.po-add-line').forEach(b=>b.addEventListener('click', ()=>edit(()=>{ d.lines.push(blankLine()); }, `l${d.lines.length}-productId`)));
+  document.getElementById('po-add-charge').addEventListener('click', ()=>edit(()=>{ d.charges = d.charges || []; d.charges.push({label:'', amount:0}); }, `c${(d.charges||[]).length}-label`));
+  document.getElementById('po-back').addEventListener('click', closePo);
+  const itemsFile = document.getElementById('po-items-file');
+  document.getElementById('po-items-template').addEventListener('click', ()=>downloadBulkTemplate(PO_ITEM_UPLOAD, 'PO items', 'PO-Items-Template.xlsx'));
+  document.getElementById('po-items-upload').addEventListener('click', ()=>itemsFile.click());
+  itemsFile.addEventListener('change', ()=>{ const f = itemsFile.files[0]; itemsFile.value = ''; if(f) uploadPoItems(f, page); });
+  document.getElementById('po-print').addEventListener('click', ()=>showChoices('Supplier PO', 'Download it as an Excel file, or open it to print or save as PDF.', [
+    {label:'Excel', run:()=>exportSupplierPo(d)},
+    {label:'Print / PDF', primary:true, run:()=>printSupplierPo(d)},
+  ]));
+  document.getElementById('po-customs').addEventListener('click', ()=>printCustomsPo(d));
+  document.getElementById('po-xlsx').addEventListener('click', ()=>exportPoCosting(d));
+  document.getElementById('po-save').addEventListener('click', ()=>savePo(page));
+  const del = document.getElementById('po-del');
+  if(del) del.addEventListener('click', ()=>showConfirm(`Delete ${d.poNumber}?`, 'This removes the purchase order permanently. It cannot be undone.', async ()=>{
+    await fb.deleteDoc(docRef('purchaseOrders/'+poOpen.id));
+    poOpen = null;
+    render();
+    showToast('PO deleted');
+  }));
+}
+
+async function savePo(page){
+  const d = poOpen.draft;
+  d.poNumber = String(d.poNumber||'').trim();
+  if(!d.poNumber){ showToast('Enter a PO number'); return; }
+  if(state.pos.some(p=>p.id!==poOpen.id && p.poNumber===d.poNumber)){ showToast(d.poNumber+' is already used by another PO'); return; }
+  const v = vendorById(d.vendorId);
+  const body = {...d, updatedAt:new Date().toISOString(), rates:ratesFor(d)};
+  if(v) body.vendor = {name:v.name||'', contact:v.contact||'', address:v.address||'', email:v.email||'', phone:v.phone||'', country:v.country||'',
+    accountNo:v.accountNo||'', bank:v.bank||'', swift:v.swift||''};
+  const id = poOpen.id || ('po_'+Date.now()+'_'+Math.random().toString(36).slice(2,7));
+  if(!poOpen.id) body.createdAt = body.updatedAt;
+  const btn = document.getElementById('po-save');
+  if(btn) btn.disabled = true;
+  try{
+    await fb.setDoc(docRef('purchaseOrders/'+id), body);
+  }catch(ex){
+    console.error(ex);
+    showToast('Could not save: ' + (ex.code==='permission-denied' ? 'this account can\'t edit purchase orders' : ex.message));
+    if(btn) btn.disabled = false;
+    return;
+  }
+  poOpen = {id, draft:JSON.parse(JSON.stringify(body)), dirty:false};
+  // Ordered and received POs set each product's last price.
+  if(d.status!=='draft'){
+    for(const l of d.lines){
+      const p = state.products.find(x=>x.id===l.productId);
+      if(p && !isBlank(l.price) && (toNum(p.lastPrice)!==toNum(l.price) || p.lastPo!==d.poNumber)){
+        try{ await fb.updateDoc(docRef('products/'+p.id), {lastPrice:toNum(l.price), lastPo:d.poNumber}); }
+        catch(ex){ console.error('last price update failed', ex); }
+      }
+    }
+  }
+  renderPoEditor(page);
+  showToast(d.poNumber + ' saved');
+}
+
+/* Beneficiary bank lines for the supplier PO; empty when the vendor has no bank details. */
+function vendorBankRows(v){
+  if(!(v.accountNo || v.bank || v.swift)) return [];
+  return [['Beneficiary', v.name], ['A/c No.', v.accountNo], ['Bank', v.bank], ['SWIFT / BIC', v.swift]].filter(([,val])=>val);
+}
+
+/* Supplier copy: what was ordered, without duty, costs or selling prices. */
+function printSupplierPo(d){
+  const s = poSettings(), b = s.buyer, v = poVendor(d), c = computePO(d), t = c.totals, cur = d.currency || 'USD';
+  const bank = vendorBankRows(v);
+  const e = escapeHtml, br = x => e(x).replace(/\n/g,'<br>');
+  const buyerIds = [b.iec && 'IEC: '+b.iec, b.gstin && 'GSTIN: '+b.gstin, b.pan && 'PAN: '+b.pan].filter(Boolean).join(' · ');
+  const buyerContact = [b.phone, b.email].filter(Boolean).join(' · ');
+  const html = `<!doctype html><html><head><meta charset="utf-8"><title>${e(d.poNumber)}</title><style>
+    @page{size:A4 landscape;margin:12mm;}
+    body{font-family:'Segoe UI',Arial,sans-serif;font-size:13px;color:#16202b;margin:0;}
+    .top{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #1F5F8B;padding-bottom:10px;margin-bottom:12px;}
+    .buyer h1{margin:0;font-size:20px;color:#1F5F8B;} .buyer .tag{font-style:italic;color:#555;margin:2px 0 6px;}
+    .title{text-align:right;} .title h2{margin:0;font-size:22px;letter-spacing:.06em;color:#1F5F8B;} .title div{margin-top:4px;font-size:12px;}
+    .boxes{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;}
+    .box{border:1px solid #c9d3dd;border-radius:4px;padding:8px 10px;} .box h3{margin:0 0 5px;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#64748B;}
+    .box table td{padding:1px 8px 1px 0;vertical-align:top;} .box table td:first-child{color:#64748B;white-space:nowrap;}
+    table.items{width:100%;border-collapse:collapse;} .items th{background:#1F5F8B;color:#fff;font-size:11.5px;padding:4px 6px;text-align:left;}
+    .items td{border-bottom:1px solid #dde3ea;padding:2px 5px;line-height:1.3;vertical-align:middle;}
+    .items th.r{white-space:nowrap;} .items .r{text-align:right;white-space:nowrap;}
+    .items .tot td{font-weight:700;background:#eef3f8;border-top:2px solid #1F5F8B;padding:4px 6px;}
+    .items .sum td{font-weight:600;padding:4px 6px;}
+    *{-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+    .terms{margin-top:14px;} .terms h3{font-size:11px;margin:0 0 4px;}
+    .bank{margin-top:14px;page-break-inside:avoid;}
+    .sign{display:grid;grid-template-columns:repeat(3,1fr);gap:30px;margin-top:40px;} .sign div{border-top:1px solid #16202b;padding-top:4px;color:#555;}
+    tr{page-break-inside:avoid;}
+  </style></head><body>
+    <div class="top">
+      <div class="buyer"><h1>${e(b.name || companyLabel(company()))}</h1>${b.tagline?`<div class="tag">${e(b.tagline)}</div>`:''}
+        ${b.address?`<div>${br(b.address)}</div>`:''}${buyerIds?`<div>${e(buyerIds)}</div>`:''}${buyerContact?`<div>${e(buyerContact)}</div>`:''}</div>
+      <div class="title"><h2>PURCHASE ORDER</h2><div><b>${e(d.poNumber)}</b></div><div>Date: ${e(fmtDate(d.date))}</div></div>
+    </div>
+    <div class="boxes">
+      <div class="box"><h3>Supplier</h3><table>
+        <tr><td>Name</td><td><b>${e(v.name||'')}</b></td></tr>
+        ${v.address?`<tr><td>Address</td><td>${br(v.address)}</td></tr>`:''}
+        ${v.contact?`<tr><td>Contact</td><td>${e(v.contact)}</td></tr>`:''}
+        ${v.phone?`<tr><td>Phone</td><td>${e(v.phone)}</td></tr>`:''}
+        ${v.email?`<tr><td>Email</td><td>${e(v.email)}</td></tr>`:''}
+        ${v.country?`<tr><td>Country</td><td>${e(v.country)}</td></tr>`:''}
+      </table></div>
+      <div class="box"><h3>Order terms</h3><table>
+        <tr><td>Payment terms</td><td>${e(d.paymentTerms||'')}</td></tr>
+        <tr><td>Currency</td><td>${e(cur)}</td></tr>
+        <tr><td>Delivery terms</td><td>${e(d.deliveryTerms||'')}</td></tr>
+        <tr><td>Shipment port</td><td>${e(d.port||'')}</td></tr>
+      </table></div>
+    </div>
+    <table class="items">
+      <thead><tr><th>#</th><th>Item / description</th><th>HS code</th><th class="r">Qty</th><th class="r">Unit price<br>(${e(cur)})</th><th class="r">Amount<br>(${e(cur)}) ${e(d.deliveryTerms||'')}</th>
+        <th class="r">NW/unit<br>(kg)</th><th class="r">GW/unit<br>(kg)</th><th class="r">Vol/unit<br>(m³)</th><th class="r">Total NW<br>(kg)</th><th class="r">Total GW<br>(kg)</th><th class="r">Total vol<br>(m³)</th></tr></thead>
+      <tbody>${d.lines.map((l,i)=>`<tr><td>${i+1}</td><td><b>${e(l.item||'')}</b>${l.spec?' — '+e(l.spec):''}</td><td>${e(l.hs||'')}</td>
+        <td class="r">${fmtQty(l.qty)}</td><td class="r">${fmtFx(l.price)}</td><td class="r">${fmtFx(c.rows[i].fob)}</td>
+        <td class="r">${fmtQty(l.nw)}</td><td class="r">${fmtQty(l.gw)}</td><td class="r">${fmtQty(l.vol,3)}</td>
+        <td class="r">${fmtQty(toNum(l.nw)*toNum(l.qty))}</td><td class="r">${fmtQty(toNum(l.gw)*toNum(l.qty))}</td><td class="r">${fmtQty(toNum(l.vol)*toNum(l.qty),3)}</td></tr>`).join('')}
+      <tr class="tot"><td colspan="3">TOTAL FOB</td><td class="r">${fmtQty(t.qty)}</td><td></td><td class="r">${e(cur)} ${fmtFx(t.fob)}</td><td></td><td></td><td></td>
+        <td class="r">${fmtQty(t.nw)}</td><td class="r">${fmtQty(t.gw)}</td><td class="r">${fmtQty(t.vol,3)}</td></tr>
+      <tr class="sum"><td colspan="5">Freight + insurance</td><td class="r">${e(cur)} ${fmtFx(toNum(d.freight) + toNum(d.insurance))}</td><td colspan="6"></td></tr>
+      <tr class="tot"><td colspan="5">TOTAL CIF VALUE</td><td class="r">${e(cur)} ${fmtFx(t.cifUsd)}</td><td colspan="6"></td></tr></tbody>
+    </table>
+    ${bank.length?`<div class="box bank"><h3>Supplier bank details</h3><table>${bank.map(([k,val])=>`<tr><td>${e(k)}</td><td>${br(val)}</td></tr>`).join('')}</table></div>`:''}
+    ${d.terms?`<div class="terms"><h3>TERMS &amp; CONDITIONS</h3>${br(d.terms)}</div>`:''}
+    <div class="sign"><div>Prepared by: name / signature / date</div><div>Approved by: name / signature / date</div><div>Supplier acceptance: name / signature / date / stamp</div></div>
+    <script>window.onload = () => window.print();<\/script>
+  </body></html>`;
+  openPrintWindow(html);
+}
+function openPrintWindow(html){
+  const w = window.open('', '_blank');
+  if(!w){ showToast('Allow pop-ups for this site to print the PO'); return; }
+  w.document.write(html);
+  w.document.close();
+}
+
+/* ---------------- Styled Excel exports (ExcelJS, loaded on first use) ---------------- */
+let excelJsLoad = null;
+function loadExcelJs(){
+  if(window.ExcelJS) return Promise.resolve(window.ExcelJS);
+  if(!excelJsLoad) excelJsLoad = new Promise((ok, fail)=>{
+    const s = document.createElement('script');
+    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js';
+    s.onload = ()=>ok(window.ExcelJS);
+    s.onerror = ()=>{ excelJsLoad = null; fail(new Error('Could not load the Excel library. Check the internet connection.')); };
+    document.head.appendChild(s);
+  });
+  return excelJsLoad;
+}
+const XL = {navy:'FF1F5F8B', ink:'FF16202B', band:'FFDFE6EF', zebra:'FFF5F8FB', total:'FFE3EBF4', amber:'FFFDE7B0', line:'FF9AA7B8', white:'FFFFFFFF'};
+const XL_FMT = {usd:'#,##0.00', inr:'"₹"#,##0', inr2:'"₹"#,##0.00', dec:'#,##0.00', vol:'0.000', pct:'0.##"%"', num:'General'};
+/* Cell-writing helpers for one worksheet: every written cell gets a thin border. */
+function xlKit(ws){
+  const thin = {style:'thin', color:{argb:XL.line}};
+  const border = {top:thin, left:thin, bottom:thin, right:thin};
+  const fill = argb => ({type:'pattern', pattern:'solid', fgColor:{argb}});
+  // value across columns c1..c2 of row r, merged when wider than one column
+  const put = (r, c1, c2, value, st={}) => {
+    if(c2 > c1) ws.mergeCells(r, c1, r, c2);
+    for(let c=c1; c<=c2; c++){ const x = ws.getCell(r, c); x.border = border; if(st.fill) x.fill = fill(st.fill); }
+    const cell = ws.getCell(r, c1);
+    cell.value = value;
+    if(st.font) cell.font = st.font;
+    if(st.fmt) cell.numFmt = st.fmt;
+    cell.alignment = {vertical:'middle', wrapText:true, ...(typeof value==='number' ? {horizontal:'right'} : {}), ...(st.align||{})};
+    return cell;
+  };
+  const band = (r, c1, c2, text) => put(r, c1, c2, text, {fill:XL.navy, font:{bold:true, color:{argb:XL.white}}});
+  const label = (r, c1, c2, text) => put(r, c1, c2, text, {fill:XL.band, font:{bold:true}});
+  const header = (r, heads, fills=[]) => {
+    heads.forEach((h,i)=>put(r, i+1, i+1, h, {fill:fills[i]||XL.navy, font:{bold:true, color:{argb:fills[i] ? XL.ink : XL.white}}, align:{horizontal:'center'}}));
+    ws.getRow(r).height = 34;
+  };
+  const line = (r, values, fmts, st={}) => values.forEach((v,i)=>put(r, i+1, i+1, v, {fmt:fmts[i], fill:st.fill, font:(st.bold||[]).includes(i) ? {bold:true} : undefined}));
+  // wrapped text in merged cells doesn't grow the row by itself
+  const fit = (r, texts) => { ws.getRow(r).height = Math.max(18, ...texts.map(([txt, perLine])=>Math.ceil(String(txt||'').length / perLine) * 15)); };
+  return {put, band, label, header, line, fit};
+}
+async function saveWorkbook(wb, filename){
+  const buf = await wb.xlsx.writeBuffer();
+  downloadBlob(new Blob([buf], {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}), filename);
+}
+
+/* Supplier copy as a workbook: same content as the printout. */
+async function exportSupplierPo(d){
+  let ExcelJS;
+  try{ ExcelJS = await loadExcelJs(); }catch(ex){ showToast(ex.message); return; }
+  const b = poSettings().buyer, v = poVendor(d), c = computePO(d), t = c.totals, cur = d.currency || 'USD', r2 = round2;
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet('Purchase Order', {views:[{showGridLines:false}],
+    pageSetup:{orientation:'landscape', paperSize:9, fitToPage:true, fitToWidth:1, fitToHeight:0, margins:{left:0.4, right:0.4, top:0.5, bottom:0.5, header:0.2, footer:0.2}}});
+  ws.columns = [5,22,34,11,8,12,14,10,10,10,11,11,11].map(width=>({width}));
+  const N = 13, k = xlKit(ws), n = x => isBlank(x) ? '' : toNum(x);
+  let r = 1;
+  k.put(r, 1, N, 'PURCHASE ORDER', {fill:XL.navy, font:{bold:true, size:18, color:{argb:XL.white}}, align:{horizontal:'center'}}); ws.getRow(r++).height = 32;
+  k.put(r, 1, N, b.name || companyLabel(company()), {font:{bold:true, size:14, color:{argb:XL.navy}}, align:{horizontal:'center'}}); ws.getRow(r++).height = 22;
+  [b.tagline, b.address && b.address.replace(/\n/g, ', '),
+   [b.iec && 'IEC: '+b.iec, b.gstin && 'GSTIN: '+b.gstin, b.pan && 'PAN: '+b.pan].filter(Boolean).join('  ·  '),
+   [b.phone, b.email].filter(Boolean).join('  ·  ')].filter(Boolean).forEach(text=>k.put(r++, 1, N, text, {align:{horizontal:'center'}}));
+  r++;
+  const left = [['PO number', d.poNumber], ['Date', fmtDate(d.date)], ['Currency', cur], ['Delivery terms', d.deliveryTerms||''], ['Shipment port', d.port||''], ['Payment terms', d.paymentTerms||'']];
+  const right = [['Supplier', v.name], ['Address', (v.address||'').replace(/\n/g, ', ')], ['Contact', v.contact], ['Phone', v.phone], ['Email', v.email], ['Country', v.country]].filter(([,x])=>x);
+  k.band(r, 1, 6, 'ORDER DETAILS'); k.band(r, 8, N, 'SUPPLIER'); r++;
+  for(let i=0; i<Math.max(left.length, right.length); i++, r++){
+    if(left[i]){ k.label(r, 1, 2, left[i][0]); k.put(r, 3, 6, left[i][1]); }
+    if(right[i]){ k.label(r, 8, 9, right[i][0]); k.put(r, 10, N, right[i][1]); }
+    k.fit(r, [[(left[i]||[])[1], 60], [(right[i]||[])[1], 55]]);
+  }
+  r++;
+  k.header(r++, ['#','Item','Description / spec','HS code','Qty',`Unit price (${cur})`,`Amount (${cur}) ${d.deliveryTerms||''}`.trim(),
+    'NW/unit (kg)','GW/unit (kg)','Vol/unit (m³)','Total NW (kg)','Total GW (kg)','Total vol (m³)']);
+  const fm = [XL_FMT.num, null, null, null, XL_FMT.num, XL_FMT.usd, XL_FMT.usd, XL_FMT.num, XL_FMT.num, XL_FMT.vol, XL_FMT.dec, XL_FMT.dec, XL_FMT.vol];
+  d.lines.forEach((l,i)=>{
+    const q = toNum(l.qty);
+    k.line(r++, [i+1, l.item||'', l.spec||'', l.hs||'', q, n(l.price), r2(c.rows[i].fob), n(l.nw), n(l.gw), n(l.vol), r2(toNum(l.nw)*q), r2(toNum(l.gw)*q), r2(toNum(l.vol)*q)],
+      fm, {fill:i%2 ? XL.zebra : null, bold:[1]});
+  });
+  const tot = {fill:XL.total, font:{bold:true}};
+  k.put(r, 1, 4, 'TOTAL FOB', {...tot, align:{horizontal:'right'}}); k.put(r, 5, 5, t.qty, {...tot, fmt:XL_FMT.num}); k.put(r, 6, 6, '', tot);
+  k.put(r, 7, 7, r2(t.fob), {...tot, fmt:XL_FMT.usd}); k.put(r, 8, 10, '', tot);
+  k.put(r, 11, 11, r2(t.nw), {...tot, fmt:XL_FMT.dec}); k.put(r, 12, 12, r2(t.gw), {...tot, fmt:XL_FMT.dec}); k.put(r, 13, 13, r2(t.vol), {...tot, fmt:XL_FMT.vol}); r++;
+  k.put(r, 1, 6, 'Freight + insurance', {font:{bold:true}, align:{horizontal:'right'}}); k.put(r, 7, 7, r2(toNum(d.freight) + toNum(d.insurance)), {font:{bold:true}, fmt:XL_FMT.usd}); r++;
+  k.put(r, 1, 6, `TOTAL CIF VALUE (${cur})`, {fill:XL.amber, font:{bold:true, size:12}, align:{horizontal:'right'}});
+  k.put(r, 7, 7, r2(t.cifUsd), {fill:XL.amber, font:{bold:true, size:12}, fmt:XL_FMT.usd}); ws.getRow(r++).height = 22;
+  const bank = vendorBankRows(v);
+  if(bank.length){
+    r++; k.band(r++, 1, N, 'SUPPLIER BANK DETAILS');
+    bank.forEach(([key, val])=>{ k.label(r, 1, 3, key); k.put(r, 4, N, val); k.fit(r++, [[val, 120]]); });
+  }
+  if(d.terms){
+    r++; k.band(r++, 1, N, 'TERMS & CONDITIONS');
+    d.terms.split('\n').forEach(text=>{ k.put(r, 1, N, text); k.fit(r++, [[text, 150]]); });
+  }
+  await saveWorkbook(wb, (d.poNumber||'PO').replace(/[^\w.-]+/g,'-') + '-supplier.xlsx');
+  showToast('Supplier PO ready');
+}
+/* "Fifty-Six Thousand Seven Hundred Seventy-Eight and Forty-Two Cents" style amounts. */
+function amountInWords(amount, cur){
+  const ones = ['','One','Two','Three','Four','Five','Six','Seven','Eight','Nine','Ten','Eleven','Twelve','Thirteen','Fourteen','Fifteen','Sixteen','Seventeen','Eighteen','Nineteen'];
+  const tens = ['','','Twenty','Thirty','Forty','Fifty','Sixty','Seventy','Eighty','Ninety'];
+  const two = x => x < 20 ? ones[x] : tens[Math.floor(x/10)] + (x%10 ? '-' + ones[x%10] : '');
+  const three = x => [x >= 100 ? ones[Math.floor(x/100)] + ' Hundred' : '', x%100 ? two(x%100) : ''].filter(Boolean).join(' ');
+  const words = x => x ? [[1e9,'Billion'],[1e6,'Million'],[1e3,'Thousand'],[1,'']]
+    .map(([div, name])=>{ const q = Math.floor(x/div) % 1000; return q ? three(q) + (name ? ' ' + name : '') : ''; }).filter(Boolean).join(' ') : 'Zero';
+  const cents = Math.round(toNum(amount)*100), whole = Math.floor(cents/100), part = cents % 100;
+  const unit = cur==='USD' ? 'US Dollars' : cur;
+  return `${unit} ${words(whole)}${part ? ` and ${two(part)} Cents` : ''} Only`;
+}
+
+/* PO for customs: the importer's PO at CIF unit prices, laid out like the customs-filing copy. */
+function printCustomsPo(d){
+  const s = poSettings(), b = s.buyer, v = poVendor(d), c = computePO(d), t = c.totals, cur = d.currency || 'USD';
+  const e = escapeHtml, br = x => e(x).replace(/\n/g,'<br>');
+  const dmy = iso => { const m = String(iso||'').match(/^(\d{4})-(\d{2})-(\d{2})$/); return m ? `${m[3]}-${m[2]}-${m[1]}` : e(iso||''); };
+  const dMonY = iso => { const dt = new Date(String(iso||'')+'T00:00:00'); return isNaN(dt) ? e(iso||'') : `${String(dt.getDate()).padStart(2,'0')}-${dt.toLocaleString('en-GB',{month:'short'})}-${dt.getFullYear()}`; };
+  const groups = [];
+  d.lines.forEach((l,i)=>{
+    const last = groups[groups.length-1];
+    if(last && last.item===(l.item||'')) last.rows.push(i); else groups.push({item:l.item||'', rows:[i]});
+  });
+  const itemRows = groups.map((g, gi)=>g.rows.map((i, k)=>{
+    const l = d.lines[i], x = c.rows[i], q = toNum(l.qty);
+    return `<tr>${k===0 ? `<td class="c" rowspan="${g.rows.length}">${gi+1}</td><td class="item" rowspan="${g.rows.length}">${e(g.item)}</td>` : ''}
+      <td>${e(l.spec||'')}</td><td class="c">${fmtQty(q)}</td><td class="r">${fmtFx(q ? x.cifUsd/q : 0)}</td><td class="r">${fmtFx(x.cifUsd)}</td></tr>`;
+  }).join('')).join('');
+  const contact = [b.gstin && 'GSTIN/UIN: ' + b.gstin, b.phone && 'Contact: ' + b.phone, b.email].filter(Boolean).map(e).join('&nbsp; | &nbsp;');
+  const terms = [
+    ['Payment', d.paymentTerms], ['Shipment', d.shipment], ['Packing', d.packing],
+    ['Beneficiary', [v.name, v.accountNo && 'A/c No. ' + v.accountNo].filter(Boolean).join('  |  ')],
+    ['Bank', v.bank], ['SWIFT / BIC', v.swift],
+  ].filter(([,val])=>val);
+  const buyerName = b.name || companyLabel(company());
+  const html = `<!doctype html><html><head><meta charset="utf-8"><title>${e(d.poNumber)} customs</title><style>
+    @page{size:A4 portrait;margin:12mm 12mm 14mm;@bottom-center{content:"${e(d.poNumber).replace(/"/g,'')}  |  Page " counter(page) " of " counter(pages);font:9px Arial,sans-serif;color:#555;}}
+    *{-webkit-print-color-adjust:exact;print-color-adjust:exact;box-sizing:border-box;}
+    body{font-family:Arial,Helvetica,sans-serif;font-size:11.5px;color:#111;margin:0;}
+    .sheet{border:1.5px solid #1F3864;}
+    .band{background:#1F3864;color:#fff;text-align:center;font-size:20px;font-weight:700;letter-spacing:.04em;padding:7px;}
+    .buyer{text-align:center;padding:6px 8px 7px;border-bottom:1.5px solid #1F3864;}
+    .buyer .name{font-size:16px;font-weight:700;color:#1F3864;letter-spacing:.03em;}
+    .buyer div{margin-top:3px;}
+    table{width:100%;border-collapse:collapse;}
+    .meta th,.meta td{border:1px solid #9aa7b8;padding:4px 6px;text-align:left;}
+    .meta th{background:#dfe6ef;width:22%;font-weight:700;} .meta td{width:28%;}
+    .meta td.r{text-align:right;}
+    .sec{background:#1F3864;color:#fff;font-weight:700;font-size:11px;padding:3px 6px;}
+    .supplier{padding:5px 8px 7px;line-height:1.45;border-bottom:1px solid #9aa7b8;}
+    .items{margin-top:8px;} .items th{background:#1F3864;color:#fff;padding:5px 6px;font-size:11px;border:1px solid #1F3864;}
+    .items td{border:1px solid #9aa7b8;padding:2px 6px;} .items td.item{font-weight:700;background:#f3f6fa;}
+    .items .c{text-align:center;} .items .r{text-align:right;white-space:nowrap;}
+    .items .tot td{font-weight:700;background:#dfe6ef;border-top:1.5px solid #1F3864;padding:4px 6px;}
+    .words{font-style:italic;padding:6px 8px;border-bottom:1px solid #9aa7b8;}
+    .terms td{border:1px solid #9aa7b8;padding:4px 6px;vertical-align:top;} .terms td:first-child{background:#dfe6ef;font-weight:700;width:30%;}
+    .sign{display:grid;grid-template-columns:1fr 1fr;gap:30px;padding:14px 8px 8px;}
+    .sign .box{height:105px;position:relative;} .sign img{max-height:100px;max-width:220px;}
+    .sign .who{font-weight:700;} .sign .line{border-top:1px solid #111;padding-top:3px;}
+    .sign .right{text-align:right;}
+    tr{page-break-inside:avoid;}
+  </style></head><body><div class="sheet">
+    <div class="band">PURCHASE ORDER</div>
+    <div class="buyer"><div class="name">${e(buyerName.toUpperCase())}</div>${b.address?`<div>${br(b.address)}</div>`:''}${contact?`<div>${contact}</div>`:''}</div>
+    <table class="meta">
+      <tr><th>P.O. No.</th><td>${e(d.poNumber)}</td><th>Date</th><td class="r">${dmy(d.date)}</td></tr>
+      <tr><th>Proforma Invoice / S/C No.</th><td>${e(d.piNumber||'')}</td><th>Invoice Date</th><td class="r">${d.piDate ? dMonY(d.piDate) : ''}</td></tr>
+      <tr><th>Price Basis</th><td>${e(d.priceBasis||'')}</td><th>Currency</th><td class="r">${e(cur)}</td></tr>
+    </table>
+    <div class="sec">SUPPLIER</div>
+    <div class="supplier"><b>${e(v.name||'')}</b>${v.address?`<br>${br(v.address)}`:''}${v.phone?`<br>Tel: ${e(v.phone)}`:''}</div>
+    <table class="items">
+      <thead><tr><th style="width:4%">#</th><th style="width:24%">Item</th><th>Description / Spec</th><th style="width:7%">Qty</th><th style="width:14%">Unit Price (${e(cur)})</th><th style="width:14%">Amount (${e(cur)})</th></tr></thead>
+      <tbody>${itemRows}
+        <tr class="tot"><td colspan="3" class="r">TOTAL</td><td class="c">${fmtQty(t.qty)}</td><td></td><td class="r">${cur==='USD'?'$':e(cur)+' '}${fmtFx(t.cifUsd)}</td></tr>
+      </tbody>
+    </table>
+    <div class="words">Amount in words: ${e(amountInWords(t.cifUsd, cur))}</div>
+    ${terms.length ? `<div class="sec">TERMS &amp; CONDITIONS</div><table class="terms">${terms.map(([k,val])=>`<tr><td>${e(k)}</td><td>${br(val)}</td></tr>`).join('')}</table>` : ''}
+    <div class="sign">
+      <div><div class="who">For ${e(buyerName.toUpperCase())}</div><div class="box">${s.stamp ? `<img src="${s.stamp}" alt="">` : ''}</div><div class="line">Authorised Signatory</div></div>
+      <div class="right"><div class="who">Accepted by Supplier</div><div class="box"></div><div class="line">Signature &amp; Stamp</div></div>
+    </div>
+  </div>
+  <script>window.onload = () => window.print();<\/script>
+  </body></html>`;
+  openPrintWindow(html);
+}
+
+/* Internal costing workbook: every column of the costing sheet, with an order summary. */
+async function exportPoCosting(d){
+  let ExcelJS;
+  try{ ExcelJS = await loadExcelJs(); }catch(ex){ showToast(ex.message); return; }
+  const c = computePO(d), t = c.totals, cur = d.currency || 'USD', r2 = round2;
+  const head = ['#','Item','Description / spec','Qty',`Unit price (${cur})`,`Amount (${cur}) FOB`,'NW/unit (kg)','GW/unit (kg)','Vol/unit (m³)','Total NW (kg)','Total GW (kg)','Total vol (m³)',
+    `CIF (${cur})`,'CIF (₹)','HS code','APTA %','BCD','SWS','IGST assessable','IGST','Landed basic cost','Total cost (incl. GST)','Unit cost', ...c.markups.map(m=>`SP @ ${m}%`)];
+  const N = head.length;
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet('Costing', {pageSetup:{orientation:'landscape', paperSize:9, fitToPage:true, fitToWidth:1, fitToHeight:0}});
+  ws.columns = head.map((h,i)=>({width: i===0 ? 5 : i===1 ? 24 : i===2 ? 28 : i>=13 ? 14 : 12}));
+  const k = xlKit(ws);
+  let r = 1;
+  k.put(r, 1, N, `PURCHASE ORDER COSTING  ·  ${d.poNumber}`, {fill:XL.navy, font:{bold:true, size:16, color:{argb:XL.white}}, align:{horizontal:'left', indent:1}}); ws.getRow(r++).height = 30;
+  r++;
+  const order = [['PO number', d.poNumber], ['Vendor', poVendor(d).name||''], ['Date', fmtDate(d.date)], ['Status', (PO_STATUS[d.status]||PO_STATUS.draft).label]];
+  const imp = [[`Exchange rate (₹ per ${cur})`, toNum(d.rate), XL_FMT.dec], [`Freight (${cur})`, toNum(d.freight), XL_FMT.usd], [`Insurance (${cur})`, toNum(d.insurance), XL_FMT.usd], ['APTA claimed', d.claimApta ? 'Yes' : 'No']];
+  const summary = [[`FOB (${cur})`, r2(t.fob), XL_FMT.usd], ['CIF (₹)', r2(t.cifInr), XL_FMT.inr], ['Customs duty (BCD + SWS)', r2(t.bcd + t.sws), XL_FMT.inr],
+    ['IGST (input credit)', r2(t.igst), XL_FMT.inr], ['Total duty payable', r2(t.bcd + t.sws + t.igst), XL_FMT.inr], ['Other charges', r2(c.other), XL_FMT.inr],
+    ['Landed basic cost', r2(t.landed), XL_FMT.inr], ['Total cost (incl. GST)', r2(t.total), XL_FMT.inr]];
+  k.band(r, 2, 3, 'ORDER'); k.band(r, 5, 8, 'IMPORT'); k.band(r, 10, 14, 'SUMMARY'); r++;
+  for(let i=0; i<summary.length; i++, r++){
+    if(order[i]){ k.label(r, 2, 2, order[i][0]); k.put(r, 3, 3, order[i][1]); }
+    if(imp[i]){ k.label(r, 5, 7, imp[i][0]); k.put(r, 8, 8, imp[i][1], {fmt:imp[i][2]}); }
+    const last = i===summary.length-1;
+    k.label(r, 10, 12, summary[i][0]);
+    k.put(r, 13, 14, summary[i][1], {fmt:summary[i][2], ...(last ? {fill:XL.amber, font:{bold:true}} : {})});
+  }
+  r++;
+  const headRow = r;
+  k.header(r++, head, head.map((h,i)=>i>=23 ? XL.amber : null));
+  const fm = [XL_FMT.num, null, null, XL_FMT.num, XL_FMT.usd, XL_FMT.usd, XL_FMT.num, XL_FMT.num, XL_FMT.vol, XL_FMT.dec, XL_FMT.dec, XL_FMT.vol,
+    XL_FMT.usd, XL_FMT.inr, null, XL_FMT.pct, XL_FMT.inr, XL_FMT.inr, XL_FMT.inr, XL_FMT.inr, XL_FMT.inr, XL_FMT.inr, XL_FMT.inr2, ...c.markups.map(()=>XL_FMT.inr)];
+  d.lines.forEach((l,i)=>{
+    const x = c.rows[i], q = toNum(l.qty);
+    k.line(r++, [i+1, l.item||'', l.spec||'', q, toNum(l.price), r2(x.fob), toNum(l.nw), toNum(l.gw), toNum(l.vol),
+      r2(toNum(l.nw)*q), r2(toNum(l.gw)*q), r2(toNum(l.vol)*q), r2(x.cifUsd), r2(x.cifInr), l.hs||'', x.apta, r2(x.bcd), r2(x.sws), r2(x.assess), r2(x.igst), r2(x.landed), r2(x.total), r2(x.unit), ...x.sp],
+      fm, {fill:i%2 ? XL.zebra : null, bold:[1, 20, 21, 22]});
+  });
+  const totals = ['TOTAL','','',t.qty,'',r2(t.fob),'','','',r2(t.nw),r2(t.gw),r2(t.vol),r2(t.cifUsd),r2(t.cifInr),'','',r2(t.bcd),r2(t.sws),r2(t.assess),r2(t.igst),r2(t.landed),r2(t.total),'', ...c.markups.map(()=>'')];
+  totals.forEach((v,i)=>k.put(r, i+1, i+1, v, {fill:XL.total, font:{bold:true}, fmt:fm[i]}));
+  r += 2;
+  k.band(r++, 2, 3, 'OTHER CHARGES (₹)');
+  (d.charges||[]).forEach(ch=>{ k.label(r, 2, 2, ch.label||''); k.put(r++, 3, 3, toNum(ch.amount), {fmt:XL_FMT.inr}); });
+  k.put(r, 2, 2, 'Total', {fill:XL.amber, font:{bold:true}}); k.put(r, 3, 3, r2(c.other), {fill:XL.amber, font:{bold:true}, fmt:XL_FMT.inr});
+  ws.views = [{state:'frozen', xSplit:3, ySplit:headRow, showGridLines:false}];
+  await saveWorkbook(wb, (d.poNumber||'PO').replace(/[^\w.-]+/g,'-') + '-costing.xlsx');
+  showToast('Costing sheet ready');
+}
+/* ---------------- Bulk upload: products master and PO items ---------------- */
+const BULK_COLS = {
+  name:{head:'Item name*', match:n=>n==='item'||n.startsWith('itemname')||n==='product'||n.startsWith('productname')},
+  spec:{head:'Description / spec', match:n=>n.includes('desc')||n.includes('spec')},
+  qty:{head:'Qty*', num:true, match:n=>n.startsWith('qty')||n.startsWith('quantity')},
+  price:{head:'Unit price (USD)*', num:true, match:n=>n.startsWith('unitprice')||n==='price'},
+  nw:{head:'NW per unit (kg)', num:true, match:n=>n.startsWith('nw')||n.startsWith('netweight')},
+  gw:{head:'GW per unit (kg)', num:true, match:n=>n.startsWith('gw')||n.startsWith('grossweight')},
+  vol:{head:'Volume per unit (m3)', num:true, match:n=>n.startsWith('vol')},
+  hs:{head:'HS code', match:n=>n.startsWith('hs')},
+  lastPrice:{head:'Last price (USD)', num:true, match:n=>n.startsWith('lastprice')},
+};
+const PRODUCT_UPLOAD = ['name','spec','hs','nw','gw','vol','lastPrice'];
+const PO_ITEM_UPLOAD = ['name','spec','qty','price','nw','gw','vol','hs'];
+/* Same item name + description (ignoring case, spaces and punctuation) = same product. */
+const productKey = (name, spec) => normHeader(name) + '|' + normHeader(spec);
+const newId = prefix => prefix + '_' + Date.now() + '_' + Math.random().toString(36).slice(2,7);
+
+function downloadBulkTemplate(fields, sheetName, filename){
+  const ws = XLSX.utils.aoa_to_sheet([fields.map(k=>BULK_COLS[k].head)]);
+  ws['!cols'] = fields.map(k=>({wch: k==='name'||k==='spec' ? 34 : 18}));
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, sheetName);
+  const arr = XLSX.write(wb, {bookType:'xlsx', type:'array'});
+  downloadBlob(new Blob([arr], {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}), companyLabel(company()).replace(/\s+/g,'-') + '-' + filename);
+  showToast('Template ready');
+}
+/* Reads the first sheet that has an item-name column. The header row can be anywhere in the first
+   40 rows, so a PO costing workbook can be uploaded as it is; a blank item name repeats the one
+   above it (merged cells), and a TOTAL row ends the list. */
+async function readBulkFile(file, fields){
+  const wb = XLSX.read(await file.arrayBuffer(), {type:'array'});
+  for(const sn of wb.SheetNames){
+    const aoa = XLSX.utils.sheet_to_json(wb.Sheets[sn], {header:1, defval:'', raw:true});
+    for(let h=0; h<Math.min(aoa.length, 40); h++){
+      const col = {};
+      (aoa[h]||[]).forEach((cell, ci)=>{
+        const n = normHeader(cell);
+        const k = n && fields.find(f=>col[f]===undefined && BULK_COLS[f].match(n));
+        if(k) col[k] = ci;
+      });
+      if(col.name===undefined) continue;
+      const rows = [];
+      let carry = '';
+      for(let r=h+1; r<aoa.length; r++){
+        const row = aoa[r] || [];
+        if([row[0], row[col.name]].some(v=>/^totals?$/i.test(String(v).trim()))) break;
+        const o = {row:r+1};
+        fields.forEach(f=>{
+          if(col[f]===undefined) return;
+          const v = row[col[f]];
+          o[f] = BULK_COLS[f].num ? (isBlank(v) ? '' : toNum(v)) : String(v??'').replace(/\s+/g,' ').trim();
+        });
+        if(o.name) carry = o.name; else if(o.spec) o.name = carry;
+        if(o.name) rows.push(o);
+      }
+      return rows;
+    }
+  }
+  return null;
+}
+async function writeDocs(coll, writes){
+  for(let i=0; i<writes.length; i+=20){
+    await Promise.all(writes.slice(i, i+20).map(w=>fb.setDoc(docRef(coll+'/'+w.id), w.data, {merge:true})));
+  }
+}
+function showChoices(title, bodyHtml, choices){
+  closeAllOverlays();
+  const overlay = document.createElement('div');
+  overlay.className = 'overlay';
+  overlay.style.alignItems = 'center';
+  overlay.innerHTML = `
+    <div class="modal" style="max-width:460px;">
+      <h2 style="font-size:17px;">${escapeHtml(title)}</h2>
+      <div style="color:var(--ink-soft);font-size:13px;">${bodyHtml}</div>
+      <div class="modal-foot">
+        <button class="btn" data-choice="-1">Cancel</button>
+        ${choices.map((c,i)=>`<button class="btn ${c.primary?'btn-primary':''}" data-choice="${i}">${escapeHtml(c.label)}</button>`).join('')}
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', e=>{ if(e.target===overlay) overlay.remove(); });
+  overlay.querySelectorAll('[data-choice]').forEach(b=>b.addEventListener('click', async ()=>{
+    overlay.remove();
+    const c = choices[+b.dataset.choice];
+    if(c) await c.run();
+  }));
+}
+const nameList = (names, max=6) => names.slice(0, max).map(escapeHtml).join('<br>') + (names.length>max ? `<br>…and ${names.length-max} more` : '');
+
+/* Products master: new rows are added, rows matching an existing product update it (blank cells leave a value as it is). */
+async function uploadProducts(file){
+  let rows = null;
+  try{ rows = await readBulkFile(file, PRODUCT_UPLOAD); }catch(ex){ console.error(ex); }
+  if(!rows || !rows.length){ showToast('No products found: the file needs an "Item name" column'); return; }
+  const existing = new Map(state.products.map(p=>[productKey(p.name, p.spec), p]));
+  const writes = new Map();
+  let added = 0, updated = 0;
+  rows.forEach(o=>{
+    const key = productKey(o.name, o.spec), data = {};
+    ['name','spec','hs'].forEach(k=>{ if(o[k]) data[k] = o[k]; });
+    ['nw','gw','vol','lastPrice'].forEach(k=>{ if(!isBlank(o[k])) data[k] = o[k]; });
+    if(writes.has(key)){ Object.assign(writes.get(key).data, data); return; }
+    const ex = existing.get(key);
+    if(ex){ writes.set(key, {id:ex.id, data}); updated++; }
+    else{ writes.set(key, {id:newId('prd'), data:{name:o.name, spec:o.spec||'', hs:'', nw:null, gw:null, vol:null, lastPrice:null, ...data}}); added++; }
+  });
+  showChoices(`Upload ${writes.size} product${writes.size!==1?'s':''}?`,
+    `${added} new product${added!==1?'s':''} will be added and ${updated} existing product${updated!==1?'s':''} updated with the file's values. Blank cells leave existing values as they are.`,
+    [{label:'Upload', primary:true, run:async ()=>{
+      try{ await writeDocs('products', [...writes.values()]); showToast(`Products uploaded: ${added} new, ${updated} updated`); }
+      catch(ex){ console.error(ex); showToast(ex.code==='permission-denied' ? 'This account can\'t edit products' : 'Upload failed: ' + ex.message); }
+    }}]);
+}
+
+/* PO items: each row is matched to a product by item name + description; rows that match none
+   create a new product in the master. File values fill the line; blank cells fall back to the product. */
+async function uploadPoItems(file, page){
+  const d = poOpen.draft;
+  let rows = null;
+  try{ rows = await readBulkFile(file, PO_ITEM_UPLOAD); }catch(ex){ console.error(ex); }
+  rows = (rows||[]).filter(o=>toNum(o.qty) > 0);
+  if(!rows.length){ showToast('No items found: the file needs "Item name" and "Qty" columns'); return; }
+  const existing = new Map(state.products.map(p=>[productKey(p.name, p.spec), p]));
+  const created = new Map();
+  const lines = rows.map(o=>{
+    const key = productKey(o.name, o.spec);
+    let p = existing.get(key) || created.get(key);
+    if(!p){
+      p = {id:newId('prd'), name:o.name, spec:o.spec||'', hs:o.hs||'', nw:isBlank(o.nw)?null:o.nw, gw:isBlank(o.gw)?null:o.gw, vol:isBlank(o.vol)?null:o.vol, lastPrice:null};
+      created.set(key, p);
+    }
+    const pick = (k, fallback) => isBlank(o[k]) ? (isBlank(fallback) ? '' : fallback) : o[k];
+    return {productId:p.id, item:p.name, spec:p.spec||'', qty:o.qty, price:pick('price', p.lastPrice),
+      nw:pick('nw', p.nw), gw:pick('gw', p.gw), vol:pick('vol', p.vol), hs:o.hs || p.hs || '', sp:[]};
+  });
+  const newProducts = [...created.values()];
+  const apply = replace => async ()=>{
+    if(newProducts.length){
+      try{ await writeDocs('products', newProducts.map(({id, ...data})=>({id, data}))); }
+      catch(ex){
+        console.error(ex);
+        showToast(ex.code==='permission-denied' ? 'This account can\'t add products, so nothing was uploaded' : 'Upload failed: ' + ex.message);
+        return;
+      }
+    }
+    d.lines = replace ? lines : d.lines.concat(lines);
+    poOpen.dirty = true;
+    renderPoEditor(page);
+    showToast(`${lines.length} item${lines.length!==1?'s':''} added. Save the PO to keep them.`);
+  };
+  const noPrice = lines.filter(l=>isBlank(l.price)).length;
+  showChoices(`Upload ${lines.length} item${lines.length!==1?'s':''}?`,
+    `${lines.length - lines.filter(l=>created.has(productKey(l.item, l.spec))).length} match products already in Masters.`
+    + (newProducts.length ? `<div class="section-note" style="margin:12px 0 0;">${newProducts.length} new product${newProducts.length!==1?'s':''} will be added to Masters → Products:<br>${nameList(newProducts.map(productLabel))}</div>` : '')
+    + (noPrice ? `<div class="hint" style="margin-top:10px;">${noPrice} item${noPrice!==1?'s have':' has'} no unit price yet.</div>` : ''),
+    [...(d.lines.length ? [{label:`Replace the ${d.lines.length} current items`, run:apply(true)}] : []),
+     {label:d.lines.length ? 'Add to the end' : 'Upload', primary:true, run:apply(false)}]);
+}
+
+/* ---------------- Masters tab ---------------- */
+let mastersTab = 'products';
+const mastersQ = {products:'', vendors:'', hscodes:''};
+const dutyPct = (h, apta) => toNum(h.bcd) * (1 - (apta ? toNum(h.apta) : 0)/100) * (1 + toNum(h.sws)/100);
+const MASTERS = {
+  products:{label:'Products', one:'product', coll:'products', sort:productLabel,
+    fields:[
+      {k:'name', label:'Item name', req:true, full:true},
+      {k:'spec', label:'Description / spec', full:true},
+      {k:'hs', label:'HS code', type:'hs'},
+      {k:'nw', label:'Net weight per unit (kg)', type:'num'},
+      {k:'gw', label:'Gross weight per unit (kg)', type:'num'},
+      {k:'vol', label:'Volume per unit (m³)', type:'num'},
+      {k:'lastPrice', label:'Last price paid (USD)', type:'num'},
+    ],
+    cols:[
+      {label:'Item', cls:'ref', cell:p=>`${escapeHtml(p.name)}${p.spec?`<div class="sub">${escapeHtml(p.spec)}</div>`:''}`},
+      {label:'HS code', cell:p=>escapeHtml(p.hs||'—')},
+      {label:'NW/unit (kg)', num:true, cell:p=>isBlank(p.nw)?'—':fmtQty(p.nw)},
+      {label:'GW/unit (kg)', num:true, cell:p=>isBlank(p.gw)?'—':fmtQty(p.gw)},
+      {label:'Vol/unit (m³)', num:true, cell:p=>isBlank(p.vol)?'—':fmtQty(p.vol,3)},
+      {label:'Last price (USD)', num:true, cell:p=>isBlank(p.lastPrice)?'—':fmtFx(p.lastPrice)+(p.lastPo?`<div class="hint">${escapeHtml(p.lastPo)}</div>`:'')},
+    ],
+    search:p=>[p.name, p.spec, p.hs].join(' ')},
+  vendors:{label:'Vendors', one:'vendor', coll:'vendors', sort:v=>v.name,
+    fields:[
+      {k:'name', label:'Company name', req:true, full:true},
+      {k:'contact', label:'Contact person'},
+      {k:'phone', label:'Phone'},
+      {k:'email', label:'Email'},
+      {k:'country', label:'Country'},
+      {k:'currency', label:'Currency', def:'USD'},
+      {k:'port', label:'Shipment port'},
+      {k:'address', label:'Address', type:'textarea', full:true},
+      {k:'paymentTerms', label:'Default payment terms', type:'textarea', full:true},
+      {k:'accountNo', label:'Bank account no. (beneficiary)'},
+      {k:'swift', label:'SWIFT / BIC'},
+      {k:'bank', label:'Bank name and address', type:'textarea', full:true},
+    ],
+    cols:[
+      {label:'Vendor', cls:'ref', cell:v=>`${escapeHtml(v.name)}${v.contact?`<div class="sub">${escapeHtml(v.contact)}</div>`:''}`},
+      {label:'Country', cell:v=>escapeHtml(v.country||'—')},
+      {label:'Port', cell:v=>escapeHtml(v.port||'—')},
+      {label:'Phone', cell:v=>escapeHtml(v.phone||'—')},
+      {label:'Email', cell:v=>escapeHtml(v.email||'—')},
+      {label:'Currency', cell:v=>escapeHtml(v.currency||'—')},
+    ],
+    search:v=>[v.name, v.contact, v.country, v.email, v.phone].join(' ')},
+  hscodes:{label:'HS codes', one:'HS code', coll:'hscodes', sort:h=>h.id, idField:'code',
+    fields:[
+      {k:'code', label:'HS code', req:true},
+      {k:'description', label:'Description'},
+      {k:'bcd', label:'BCD %', type:'num', def:7.5},
+      {k:'apta', label:'APTA concession (% off BCD)', type:'num', def:0},
+      {k:'sws', label:'SWS (% of BCD)', type:'num', def:10},
+      {k:'igst', label:'IGST %', type:'num', def:18},
+    ],
+    cols:[
+      {label:'HS code', cls:'ref', cell:h=>escapeHtml(h.id)},
+      {label:'Description', cell:h=>escapeHtml(h.description||'—')},
+      {label:'BCD %', num:true, cell:h=>fmtQty(h.bcd)},
+      {label:'APTA %', num:true, cell:h=>toNum(h.apta)?fmtQty(h.apta):'—'},
+      {label:'SWS %', num:true, cell:h=>fmtQty(h.sws)},
+      {label:'IGST %', num:true, cell:h=>fmtQty(h.igst)},
+      {label:'Duty on CIF', num:true, cell:h=>fmtQty(dutyPct(h,false),3)+'%'+(toNum(h.apta)?`<div class="hint">${fmtQty(dutyPct(h,true),3)}% with APTA</div>`:'')},
+    ],
+    search:h=>[h.id, h.description].join(' ')},
+};
+
+function renderMasters(page){
+  const tabs = [...Object.entries(MASTERS).map(([k,m])=>[k, m.label]), ['posettings','PO settings']];
+  page.innerHTML = `
+    <div class="pagehead"><div><h1>Masters</h1><p>Vendors, products and HS codes used by Purchase Orders, and what's printed on every PO.</p></div></div>
+    <div class="month-tabs" id="m-tabs">${tabs.map(([k,label])=>`<div class="month-tab ${mastersTab===k?'active':''}" data-tab="${k}">${escapeHtml(label)}</div>`).join('')}</div>
+    <div id="m-body"></div>`;
+  page.querySelectorAll('#m-tabs .month-tab').forEach(t=>t.addEventListener('click', ()=>{ mastersTab = t.dataset.tab; renderMasters(page); }));
+  const body = document.getElementById('m-body');
+  if(mastersTab==='posettings') renderPoSettings(body);
+  else renderMasterList(body, mastersTab);
+}
+
+function renderMasterList(body, kind){
+  const def = MASTERS[kind], all = state[def.coll];
+  const q = mastersQ[kind].toLowerCase();
+  const rows = all.filter(r=>!q || def.search(r).toLowerCase().includes(q)).sort(byText(def.sort));
+  body.innerHTML = `
+    <div class="toolbar">
+      <input type="search" id="m-q" placeholder="Search ${escapeAttr(def.label.toLowerCase())}…" value="${escapeAttr(mastersQ[kind])}">
+      <div class="spacer"></div>
+      <span class="muted" style="font-size:12px;">${rows.length} of ${all.length}</span>
+      ${kind==='products' ? '<button class="btn btn-sm" id="m-template">Download template</button><button class="btn btn-sm" id="m-upload">Upload products</button><input type="file" id="m-file" accept=".xlsx,.xls,.csv" hidden>' : ''}
+      <button class="btn btn-primary btn-sm" id="m-add">+ Add ${escapeHtml(def.one)}</button>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr>${def.cols.map(c=>`<th class="${c.num?'num':''}">${escapeHtml(c.label)}</th>`).join('')}<th></th></tr></thead>
+        <tbody>
+        ${rows.map(r=>`<tr data-id="${escapeAttr(r.id)}" style="cursor:pointer;">${def.cols.map(c=>`<td class="${c.num?'num':''} ${c.cls||''}">${c.cell(r)}</td>`).join('')}
+          <td style="text-align:right;"><button class="icon-btn m-del" data-id="${escapeAttr(r.id)}" title="Delete">✕</button></td></tr>`).join('')
+          || `<tr><td colspan="${def.cols.length+1}" class="empty">${all.length ? 'Nothing matches.' : `No ${escapeHtml(def.label.toLowerCase())} yet.`}</td></tr>`}
+        </tbody>
+      </table>
+    </div>`;
+  document.getElementById('m-q').addEventListener('input', e=>{ mastersQ[kind] = e.target.value; renderMasterList(body, kind); const el = document.getElementById('m-q'); el.focus(); el.setSelectionRange(el.value.length, el.value.length); });
+  document.getElementById('m-add').addEventListener('click', ()=>openMasterModal(kind, null));
+  if(kind==='products'){
+    const fileIn = document.getElementById('m-file');
+    document.getElementById('m-template').addEventListener('click', ()=>downloadBulkTemplate(PRODUCT_UPLOAD, 'Products', 'Products-Template.xlsx'));
+    document.getElementById('m-upload').addEventListener('click', ()=>fileIn.click());
+    fileIn.addEventListener('change', ()=>{ const f = fileIn.files[0]; fileIn.value = ''; if(f) uploadProducts(f); });
+  }
+  body.querySelectorAll('tbody tr[data-id]').forEach(tr=>tr.addEventListener('click', e=>{ if(!e.target.closest('.m-del')) openMasterModal(kind, tr.dataset.id); }));
+  body.querySelectorAll('.m-del').forEach(b=>b.addEventListener('click', e=>{ e.stopPropagation(); deleteMaster(kind, b.dataset.id); }));
+}
+
+function masterInUse(kind, id){
+  if(kind==='vendors'){
+    const n = state.pos.filter(p=>p.vendorId===id).length;
+    return n ? `${n} PO${n!==1?'s use':' uses'} it` : '';
+  }
+  if(kind==='hscodes'){
+    const n = state.products.filter(p=>p.hs===id).length + state.pos.filter(p=>(p.lines||[]).some(l=>l.hs===id)).length;
+    return n ? `${n} product${n!==1?'s or POs use':' or PO uses'} it` : '';
+  }
+  return '';
+}
+function deleteMaster(kind, id){
+  const def = MASTERS[kind], r = state[def.coll].find(x=>x.id===id);
+  if(!r) return;
+  const name = kind==='products' ? productLabel(r) : kind==='hscodes' ? r.id : r.name;
+  const used = masterInUse(kind, id);
+  if(used){ showToast(`Can't delete ${name}: ${used}`); return; }
+  showConfirm(`Delete ${def.one} ${name}?`, kind==='products' ? 'Existing POs keep their own copy of the item details.' : 'This removes it permanently.', async ()=>{
+    await fb.deleteDoc(docRef(def.coll+'/'+id));
+    showToast('Deleted ' + name);
+  });
+}
+
+function openMasterModal(kind, id){
+  const def = MASTERS[kind];
+  const r = id ? state[def.coll].find(x=>x.id===id) : null;
+  if(id && !r) return;
+  const val = f => r ? (f.k===def.idField ? r.id : r[f.k]) : f.def;
+  const input = f => {
+    const v = val(f), name = `name="${f.k}" ${f.req?'required':''}`;
+    if(f.type==='textarea') return `<textarea ${name} rows="3">${escapeHtml(v??'')}</textarea>`;
+    if(f.type==='hs') return `<select ${name}><option value="">—</option>${state.hscodes.slice().sort(byText(h=>h.id)).map(h=>`<option value="${escapeAttr(h.id)}" ${v===h.id?'selected':''}>${escapeHtml(h.id)}${h.description?' · '+escapeHtml(h.description):''}</option>`).join('')}</select>`;
+    return `<input ${name} ${f.type==='num'?'type="number" step="any"':''} value="${escapeAttr(v??'')}" ${f.k===def.idField && r ? 'disabled' : ''}>`;
+  };
+  closeAllOverlays();
+  const overlay = document.createElement('div');
+  overlay.className = 'overlay';
+  overlay.innerHTML = `
+    <div class="modal">
+      <h2>${r ? 'Edit' : 'New'} ${escapeHtml(def.one)}</h2>
+      <form id="m-form">
+        <div class="po-form">${def.fields.map(f=>`<div class="field ${f.full?'full':''}"><label>${escapeHtml(f.label)}</label>${input(f)}</div>`).join('')}</div>
+        <p id="m-error" style="color:var(--negative);font-size:13px;margin:0;min-height:18px;"></p>
+        <div class="modal-foot">
+          <button type="button" class="btn" id="m-cancel">Cancel</button>
+          <button type="submit" class="btn btn-primary">${r ? 'Save' : 'Add ' + escapeHtml(def.one)}</button>
+        </div>
+      </form>
+    </div>`;
+  document.body.appendChild(overlay);
+  const form = overlay.querySelector('#m-form');
+  overlay.addEventListener('click', e=>{ if(e.target===overlay) overlay.remove(); });
+  overlay.querySelector('#m-cancel').addEventListener('click', ()=>overlay.remove());
+  form.addEventListener('submit', async e=>{
+    e.preventDefault();
+    const err = overlay.querySelector('#m-error');
+    const data = {};
+    def.fields.forEach(f=>{
+      if(f.k===def.idField) return;
+      const raw = form.elements[f.k].value;
+      data[f.k] = f.type==='num' ? (raw==='' ? null : toNum(raw)) : raw.trim();
+    });
+    let docId = id;
+    if(!docId){
+      if(def.idField){
+        docId = form.elements[def.idField].value.replace(/\s+/g,'');
+        if(!docId || docId.includes('/')){ err.textContent = 'Enter a valid ' + def.one + '.'; return; }
+        if(state[def.coll].some(x=>x.id===docId)){ err.textContent = docId + ' already exists.'; return; }
+      }else{
+        docId = def.coll.slice(0,3) + '_' + Date.now() + '_' + Math.random().toString(36).slice(2,7);
+      }
+    }
+    if(def.idField) data[def.idField] = docId;
+    try{
+      await fb.setDoc(docRef(def.coll+'/'+docId), data, {merge:true});
+      overlay.remove();
+      showToast(r ? 'Saved' : def.one[0].toUpperCase() + def.one.slice(1) + ' added');
+    }catch(ex){
+      console.error(ex);
+      err.textContent = ex.code==='permission-denied' ? 'This account can\'t edit masters.' : 'Could not save. ' + (ex.message||'');
+    }
+  });
+}
+
+/* Scale an uploaded image down to maxWidth and return it as a data URL small enough to keep in a
+   Firestore document (PNG keeps transparency; falls back to JPEG if the PNG is too large). */
+async function shrinkImage(file, maxWidth){
+  const url = URL.createObjectURL(file);
+  try{
+    const img = await new Promise((ok, fail)=>{ const i = new Image(); i.onload = ()=>ok(i); i.onerror = fail; i.src = url; });
+    const scale = Math.min(1, maxWidth / img.naturalWidth);
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(img.naturalWidth * scale);
+    canvas.height = Math.round(img.naturalHeight * scale);
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    let data = canvas.toDataURL('image/png');
+    if(data.length > 600000){
+      ctx.globalCompositeOperation = 'destination-over';
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      data = canvas.toDataURL('image/jpeg', 0.85);
+    }
+    return data;
+  }finally{ URL.revokeObjectURL(url); }
+}
+
+function renderPoSettings(body){
+  const s = poSettings(), b = s.buyer;
+  const bf = (k, label, ta) => `<div class="field ${ta?'full':''}"><label>${label}</label>${ta ? `<textarea name="b-${k}" rows="3">${escapeHtml(b[k]||'')}</textarea>` : `<input name="b-${k}" value="${escapeAttr(b[k]||'')}">`}</div>`;
+  body.innerHTML = `
+    <form id="pos-form">
+      <div class="chart-row" style="align-items:flex-start;">
+        <div class="panel">
+          <h3>Buyer details printed on the PO</h3>
+          <div class="po-form">
+            ${bf('name','Buyer name')}${bf('tagline','Tagline')}${bf('address','Address',true)}
+            ${bf('iec','IEC')}${bf('gstin','GSTIN')}${bf('pan','PAN')}${bf('phone','Phone')}${bf('email','Email')}
+          </div>
+        </div>
+        <div class="panel">
+          <h3>Selling price markups</h3>
+          <div class="po-form" style="grid-template-columns:repeat(3,1fr);">
+            ${s.markups.map((m,i)=>`<div class="field"><label>Markup ${i+1} (%)</label><input name="mk${i}" type="number" step="any" value="${escapeAttr(m)}"></div>`).join('')}
+          </div>
+          <div class="hint" style="margin:-6px 0 18px;">Unit landed cost plus the markup, rounded up to the nearest ₹5.</div>
+          <div class="field"><label>Other charges on a new PO (one per line)</label><textarea name="heads" rows="6">${escapeHtml(s.chargeHeads.join('\n'))}</textarea></div>
+          <div class="field"><label>Terms &amp; conditions on a new PO</label><textarea name="terms" rows="6">${escapeHtml(s.terms)}</textarea></div>
+        </div>
+      </div>
+      <div class="chart-row" style="align-items:flex-start;">
+        <div class="panel">
+          <h3>PO for customs: defaults on a new PO</h3>
+          <div class="field"><label>Price basis</label><input name="priceBasis" value="${escapeAttr(s.priceBasis)}"></div>
+          <div class="field"><label>Shipment</label><input name="shipment" value="${escapeAttr(s.shipment)}" placeholder="e.g. 15 days after receipt of T/T payment."></div>
+          <div class="field"><label>Packing</label><input name="packing" value="${escapeAttr(s.packing)}" placeholder="e.g. Pallet. Shipping mark: as per buyer's requirements."></div>
+        </div>
+        <div class="panel">
+          <h3>Company stamp &amp; signature</h3>
+          <div class="stamp-preview" id="pos-stamp-preview">${s.stamp ? `<img src="${s.stamp}" alt="Company stamp">` : '<span class="muted">No stamp uploaded</span>'}</div>
+          <div class="toolbar" style="margin:10px 0 0;">
+            <button type="button" class="btn btn-sm" id="pos-stamp-pick">${s.stamp ? 'Replace image' : 'Upload image'}</button>
+            <button type="button" class="btn btn-sm btn-danger" id="pos-stamp-clear" ${s.stamp ? '' : 'hidden'}>Remove</button>
+            <input type="file" id="pos-stamp-file" accept="image/png,image/jpeg,image/webp" hidden>
+          </div>
+          <div class="hint">Printed above "Authorised Signatory" on the PO for customs. A PNG with a transparent background looks best. Save PO settings after changing it.</div>
+        </div>
+      </div>
+      <button type="submit" class="btn btn-primary">Save PO settings</button>
+    </form>`;
+  const form = document.getElementById('pos-form');
+  let stamp = s.stamp;
+  const showStamp = () => {
+    document.getElementById('pos-stamp-preview').innerHTML = stamp ? `<img src="${stamp}" alt="Company stamp">` : '<span class="muted">No stamp uploaded</span>';
+    document.getElementById('pos-stamp-pick').textContent = stamp ? 'Replace image' : 'Upload image';
+    document.getElementById('pos-stamp-clear').hidden = !stamp;
+  };
+  const stampFile = document.getElementById('pos-stamp-file');
+  document.getElementById('pos-stamp-pick').addEventListener('click', ()=>stampFile.click());
+  document.getElementById('pos-stamp-clear').addEventListener('click', ()=>{ stamp = ''; showStamp(); });
+  stampFile.addEventListener('change', async ()=>{
+    const f = stampFile.files[0];
+    stampFile.value = '';
+    if(!f) return;
+    try{ stamp = await shrinkImage(f, 480); showStamp(); }
+    catch(ex){ console.error(ex); showToast('Could not read that image'); }
+  });
+  form.addEventListener('submit', async e=>{
+    e.preventDefault();
+    const buyer = {};
+    Object.keys(PO_DEFAULTS.buyer).forEach(k=>{ buyer[k] = form.elements['b-'+k].value.trim(); });
+    const markups = s.markups.map((m,i)=>toNum(form.elements['mk'+i].value));
+    const chargeHeads = form.elements.heads.value.split('\n').map(x=>x.trim()).filter(Boolean);
+    try{
+      await fb.setDoc(docRef('meta/purchasing'), {buyer, markups, chargeHeads, terms:form.elements.terms.value.trim(),
+        priceBasis:form.elements.priceBasis.value.trim(), shipment:form.elements.shipment.value.trim(), packing:form.elements.packing.value.trim(), stamp});
+      showToast('PO settings saved');
+    }catch(ex){
+      console.error(ex);
+      showToast(ex.code==='permission-denied' ? 'This account can\'t edit PO settings' : 'Could not save PO settings');
+    }
+  });
+}
+
+/* ============================================================
    USERS (admin only)
    ============================================================ */
 const ASSIGNABLE_PAGES = () => PAGES.filter(p=>!p.adminOnly);
@@ -2515,7 +3789,8 @@ function showLogin(onSubmit, onReset){
 <script type="module">
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/12.4.0/firebase-app.js';
 import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, sendPasswordResetEmail, signOut, createUserWithEmailAndPassword } from 'https://www.gstatic.com/firebasejs/12.4.0/firebase-auth.js';
-import { getFirestore, collection, doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, onSnapshot, query, limit } from 'https://www.gstatic.com/firebasejs/12.4.0/firebase-firestore.js';
+import { getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager, terminate, clearIndexedDbPersistence,
+  collection, doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, onSnapshot, query, limit } from 'https://www.gstatic.com/firebasejs/12.4.0/firebase-firestore.js';
 
 const firebaseConfig = {
   apiKey: 'AIzaSyCnRbxcrCl_sqiILspT-pNScxmI6adYc_s',
@@ -2535,8 +3810,14 @@ async function createUser(email, password){
   await signOut(userAdminAuth);
   return cred.user.uid;
 }
+// Keep a copy of the data on this device (IndexedDB, shared by open tabs). The app opens from the
+// copy and the server sends only what changed, which saves reads when it is reopened within about
+// 30 minutes (Firestore bills a full re-read after a longer gap). Falls back to memory if unavailable.
+let db;
+try{ db = initializeFirestore(app, {localCache: persistentLocalCache({tabManager: persistentMultipleTabManager()})}); }
+catch(e){ console.warn('Offline cache unavailable, using memory only', e); db = getFirestore(app); }
 window.fb = {
-  db: getFirestore(app), collection, doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, onSnapshot, query, limit,
+  db, collection, doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, onSnapshot, query, limit,
   createUser, resetPassword: email=>sendPasswordResetEmail(auth, email),
 };
 
@@ -2544,6 +3825,10 @@ showCompanyBrand();
 document.getElementById('btn-switch-company').addEventListener('click', ()=>openCompanySwitcher());
 document.getElementById('btn-signout').addEventListener('click', async ()=>{
   await signOut(auth);
+  // Don't leave the company's data on a shared computer. Clearing fails while the app is open in
+  // another tab; the copy is then removed by the next sign-out with only this tab open.
+  try{ await terminate(db); await clearIndexedDbPersistence(db); }
+  catch(e){ console.warn('Could not clear the offline copy', e); }
   location.reload();   // drops live listeners and in-memory data
 });
 
