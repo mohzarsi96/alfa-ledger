@@ -2330,7 +2330,7 @@ function renderPoEditor(page){
     const found = products.some(p=>p.id===l.productId);
     return `<option value="">Choose product…</option>`
       + (l.productId && !found ? `<option value="${escapeAttr(l.productId)}" selected>${escapeHtml(productLabel({name:l.item||'(removed product)'}))}</option>` : '')
-      + products.map(p=>`<option value="${escapeAttr(p.id)}" ${p.id===l.productId?'selected':''}>${escapeHtml(productLabel(p))}</option>`).join('');
+      + products.map(p=>`<option value="${escapeAttr(p.id)}" ${p.id===l.productId?'selected':''}>${escapeHtml((p.sku ? p.sku + ' · ' : '') + productLabel(p))}</option>`).join('');
   };
   const hsOpts = sel => `<option value="">—</option>`
     + state.hscodes.map(h=>h.id).sort().map(code=>`<option ${sel===code?'selected':''}>${escapeHtml(code)}</option>`).join('')
@@ -2523,7 +2523,10 @@ function renderPoEditor(page){
     {label:'Excel', run:()=>exportSupplierPo(d)},
     {label:'Print / PDF', primary:true, run:()=>printSupplierPo(d)},
   ]));
-  document.getElementById('po-customs').addEventListener('click', ()=>printCustomsPo(d));
+  document.getElementById('po-customs').addEventListener('click', ()=>showChoices('PO for customs', 'Download it as an Excel file, or open it to print or save as PDF.', [
+    {label:'Excel', run:()=>exportCustomsPo(d)},
+    {label:'Print / PDF', primary:true, run:()=>printCustomsPo(d)},
+  ]));
   document.getElementById('po-xlsx').addEventListener('click', ()=>exportPoCosting(d));
   document.getElementById('po-save').addEventListener('click', ()=>savePo(page));
   const del = document.getElementById('po-del');
@@ -2764,29 +2767,114 @@ function amountInWords(amount, cur){
   return `${unit} ${words(whole)}${part ? ` and ${two(part)} Cents` : ''} Only`;
 }
 
-/* PO for customs: the importer's PO at CIF unit prices, laid out like the customs-filing copy. */
-function printCustomsPo(d){
-  const s = poSettings(), b = s.buyer, v = poVendor(d), c = computePO(d), t = c.totals, cur = d.currency || 'USD';
-  const e = escapeHtml, br = x => e(x).replace(/\n/g,'<br>');
-  const dmy = iso => { const m = String(iso||'').match(/^(\d{4})-(\d{2})-(\d{2})$/); return m ? `${m[3]}-${m[2]}-${m[1]}` : e(iso||''); };
-  const dMonY = iso => { const dt = new Date(String(iso||'')+'T00:00:00'); return isNaN(dt) ? e(iso||'') : `${String(dt.getDate()).padStart(2,'0')}-${dt.toLocaleString('en-GB',{month:'short'})}-${dt.getFullYear()}`; };
-  const groups = [];
+/* What the PO for customs shows, shared by the printout and the Excel file. */
+function customsPoParts(d){
+  const s = poSettings(), b = s.buyer, v = poVendor(d), c = computePO(d);
+  const groups = [];   // consecutive lines with the same item name share one "#" and "Item" cell
   d.lines.forEach((l,i)=>{
     const last = groups[groups.length-1];
     if(last && last.item===(l.item||'')) last.rows.push(i); else groups.push({item:l.item||'', rows:[i]});
   });
+  return {s, b, v, c, t:c.totals, cur:d.currency || 'USD', groups,
+    buyerName: b.name || companyLabel(company()),
+    contact: [b.gstin && 'GSTIN/UIN: ' + b.gstin, b.phone && 'Contact: ' + b.phone, b.email].filter(Boolean),
+    terms: [
+      ['Payment', d.paymentTerms], ['Shipment', d.shipment], ['Packing', d.packing],
+      ['Beneficiary', [v.name, v.accountNo && 'A/c No. ' + v.accountNo].filter(Boolean).join('  |  ')],
+      ['Bank', v.bank], ['SWIFT / BIC', v.swift],
+    ].filter(([,val])=>val),
+    poDate: (m => m ? `${m[3]}-${m[2]}-${m[1]}` : String(d.date||''))(String(d.date||'').match(/^(\d{4})-(\d{2})-(\d{2})$/)),
+    piDate: (dt => !d.piDate ? '' : isNaN(dt) ? String(d.piDate) : `${String(dt.getDate()).padStart(2,'0')}-${dt.toLocaleString('en-GB',{month:'short'})}-${dt.getFullYear()}`)(new Date(String(d.piDate||'')+'T00:00:00')),
+  };
+}
+
+/* PO for customs as a workbook, laid out like the printout (portrait A4, page numbers in the footer). */
+async function exportCustomsPo(d){
+  let ExcelJS;
+  try{ ExcelJS = await loadExcelJs(); }catch(ex){ showToast(ex.message); return; }
+  const {s, b, v, c, t, cur, groups, buyerName, terms, poDate, piDate, contact} = customsPoParts(d);
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet('PO for customs', {views:[{showGridLines:false}],
+    pageSetup:{orientation:'portrait', paperSize:9, fitToPage:true, fitToWidth:1, fitToHeight:0, margins:{left:0.45, right:0.45, top:0.5, bottom:0.6, header:0.2, footer:0.25}},
+    headerFooter:{oddFooter:`&C${String(d.poNumber||'').replace(/&/g,'&&')}  |  Page &P of &N`}});
+  ws.columns = [6, 26, 38, 8, 15, 16].map(width=>({width}));
+  const N = 6, k = xlKit(ws), navy = 'FF1F3864', onNavy = {bold:true, color:{argb:XL.white}};
+  // text without a border (signature block)
+  const plain = (r, c1, c2, text, font, align) => {
+    if(c2 > c1) ws.mergeCells(r, c1, r, c2);
+    const cell = ws.getCell(r, c1);
+    cell.value = text; if(font) cell.font = font; cell.alignment = {vertical:'middle', ...(align||{})};
+  };
+  let r = 1;
+  k.put(r, 1, N, 'PURCHASE ORDER', {fill:navy, font:{...onNavy, size:16}, align:{horizontal:'center'}}); ws.getRow(r++).height = 26;
+  k.put(r, 1, N, buyerName.toUpperCase(), {font:{bold:true, size:13, color:{argb:navy}}, align:{horizontal:'center'}}); ws.getRow(r++).height = 20;
+  if(b.address){ k.put(r, 1, N, b.address.replace(/\n/g, ', '), {align:{horizontal:'center'}}); k.fit(r++, [[b.address, 95]]); }
+  if(contact.length) k.put(r++, 1, N, contact.join('  |  '), {align:{horizontal:'center'}});
+  [['P.O. No.', d.poNumber, 'Date', poDate], ['Proforma Invoice / S/C No.', d.piNumber||'', 'Invoice Date', piDate], ['Price Basis', d.priceBasis||'', 'Currency', cur]]
+    .forEach(([l1, v1, l2, v2])=>{ k.label(r, 1, 2, l1); k.put(r, 3, 3, v1); k.label(r, 4, 5, l2); k.put(r, 6, 6, v2, {align:{horizontal:'right'}}); r++; });
+  k.put(r++, 1, N, 'SUPPLIER', {fill:navy, font:onNavy});
+  [v.name, (v.address||'').replace(/\n/g, ', '), v.phone && 'Tel: ' + v.phone].filter(Boolean)
+    .forEach((text, i)=>{ k.put(r, 1, N, text, i===0 ? {font:{bold:true}} : {}); k.fit(r++, [[text, 95]]); });
+  r++;
+  ['#','Item','Description / Spec','Qty',`Unit Price (${cur})`,`Amount (${cur})`]
+    .forEach((h,i)=>k.put(r, i+1, i+1, h, {fill:navy, font:onNavy, align:{horizontal:'center'}}));
+  ws.getRow(r++).height = 20;
+  groups.forEach((g, gi)=>{
+    const r0 = r;
+    g.rows.forEach(i=>{
+      const l = d.lines[i], x = c.rows[i], q = toNum(l.qty);
+      k.put(r, 1, 1, r===r0 ? gi+1 : null, {align:{horizontal:'center'}});
+      k.put(r, 2, 2, r===r0 ? g.item : null, {fill:'FFF3F6FA', font:{bold:true}});
+      k.put(r, 3, 3, l.spec||'');
+      k.put(r, 4, 4, q, {fmt:XL_FMT.num, align:{horizontal:'center'}});
+      k.put(r, 5, 5, round2(q ? x.cifUsd/q : 0), {fmt:XL_FMT.usd});
+      k.put(r, 6, 6, round2(x.cifUsd), {fmt:XL_FMT.usd});
+      r++;
+    });
+    if(r - 1 > r0){ ws.mergeCells(r0, 1, r-1, 1); ws.mergeCells(r0, 2, r-1, 2); }
+  });
+  const tot = {fill:XL.band, font:{bold:true}};
+  k.put(r, 1, 3, 'TOTAL', {...tot, align:{horizontal:'right'}});
+  k.put(r, 4, 4, t.qty, {...tot, fmt:XL_FMT.num, align:{horizontal:'center'}});
+  k.put(r, 5, 5, '', tot);
+  k.put(r, 6, 6, round2(t.cifUsd), {...tot, fmt:cur==='USD' ? '"$"#,##0.00' : XL_FMT.usd}); r++;
+  const words = 'Amount in words: ' + amountInWords(t.cifUsd, cur);
+  k.put(r, 1, N, words, {font:{italic:true}}); k.fit(r++, [[words, 95]]);
+  if(terms.length){
+    r++;
+    k.put(r++, 1, N, 'TERMS & CONDITIONS', {fill:navy, font:onNavy});
+    terms.forEach(([key, val])=>{ k.label(r, 1, 2, key); k.put(r, 3, N, String(val).replace(/\n/g, ', ')); k.fit(r++, [[val, 70]]); });
+  }
+  r++;
+  plain(r, 1, 3, 'For ' + buyerName.toUpperCase(), {bold:true});
+  plain(r, 5, 6, 'Accepted by Supplier', {bold:true}, {horizontal:'right'});
+  const stampRow = ++r;
+  for(let i=0; i<5; i++) ws.getRow(r++).height = 18;
+  if(s.stamp){
+    const m = s.stamp.match(/^data:image\/(png|jpe?g)/);
+    if(m){
+      const [w0, h0] = await new Promise(ok=>{ const im = new Image(); im.onload = ()=>ok([im.naturalWidth, im.naturalHeight]); im.onerror = ()=>ok([2, 1]); im.src = s.stamp; });
+      const h = 88, w = Math.min(220, w0 * h / h0);
+      ws.addImage(wb.addImage({base64:s.stamp, extension:m[1]==='png' ? 'png' : 'jpeg'}), {tl:{col:0.3, row:stampRow - 1 + 0.2}, ext:{width:w, height:h}});
+    }
+  }
+  plain(r, 1, 3, 'Authorised Signatory');
+  plain(r, 5, 6, 'Signature & Stamp', null, {horizontal:'right'});
+  [1, 2, 3, 5, 6].forEach(col=>{ ws.getCell(r, col).border = {top:{style:'thin', color:{argb:XL.ink}}}; });
+  await saveWorkbook(wb, (d.poNumber||'PO').replace(/[^\w.-]+/g,'-') + '-customs.xlsx');
+  showToast('PO for customs ready');
+}
+
+/* PO for customs: the importer's PO at CIF unit prices, laid out like the customs-filing copy. */
+function printCustomsPo(d){
+  const {s, b, v, c, t, cur, groups, buyerName, terms, poDate, piDate, contact:contactParts} = customsPoParts(d);
+  const e = escapeHtml, br = x => e(x).replace(/\n/g,'<br>');
   const itemRows = groups.map((g, gi)=>g.rows.map((i, k)=>{
     const l = d.lines[i], x = c.rows[i], q = toNum(l.qty);
     return `<tr>${k===0 ? `<td class="c" rowspan="${g.rows.length}">${gi+1}</td><td class="item" rowspan="${g.rows.length}">${e(g.item)}</td>` : ''}
       <td>${e(l.spec||'')}</td><td class="c">${fmtQty(q)}</td><td class="r">${fmtFx(q ? x.cifUsd/q : 0)}</td><td class="r">${fmtFx(x.cifUsd)}</td></tr>`;
   }).join('')).join('');
-  const contact = [b.gstin && 'GSTIN/UIN: ' + b.gstin, b.phone && 'Contact: ' + b.phone, b.email].filter(Boolean).map(e).join('&nbsp; | &nbsp;');
-  const terms = [
-    ['Payment', d.paymentTerms], ['Shipment', d.shipment], ['Packing', d.packing],
-    ['Beneficiary', [v.name, v.accountNo && 'A/c No. ' + v.accountNo].filter(Boolean).join('  |  ')],
-    ['Bank', v.bank], ['SWIFT / BIC', v.swift],
-  ].filter(([,val])=>val);
-  const buyerName = b.name || companyLabel(company());
+  const contact = contactParts.map(e).join('&nbsp; | &nbsp;');
   const html = `<!doctype html><html><head><meta charset="utf-8"><title>${e(d.poNumber)} customs</title><style>
     @page{size:A4 portrait;margin:12mm 12mm 14mm;@bottom-center{content:"${e(d.poNumber).replace(/"/g,'')}  |  Page " counter(page) " of " counter(pages);font:9px Arial,sans-serif;color:#555;}}
     *{-webkit-print-color-adjust:exact;print-color-adjust:exact;box-sizing:border-box;}
@@ -2817,8 +2905,8 @@ function printCustomsPo(d){
     <div class="band">PURCHASE ORDER</div>
     <div class="buyer"><div class="name">${e(buyerName.toUpperCase())}</div>${b.address?`<div>${br(b.address)}</div>`:''}${contact?`<div>${contact}</div>`:''}</div>
     <table class="meta">
-      <tr><th>P.O. No.</th><td>${e(d.poNumber)}</td><th>Date</th><td class="r">${dmy(d.date)}</td></tr>
-      <tr><th>Proforma Invoice / S/C No.</th><td>${e(d.piNumber||'')}</td><th>Invoice Date</th><td class="r">${d.piDate ? dMonY(d.piDate) : ''}</td></tr>
+      <tr><th>P.O. No.</th><td>${e(d.poNumber)}</td><th>Date</th><td class="r">${e(poDate)}</td></tr>
+      <tr><th>Proforma Invoice / S/C No.</th><td>${e(d.piNumber||'')}</td><th>Invoice Date</th><td class="r">${e(piDate)}</td></tr>
       <tr><th>Price Basis</th><td>${e(d.priceBasis||'')}</td><th>Currency</th><td class="r">${e(cur)}</td></tr>
     </table>
     <div class="sec">SUPPLIER</div>
@@ -2892,6 +2980,7 @@ async function exportPoCosting(d){
 }
 /* ---------------- Bulk upload: products master and PO items ---------------- */
 const BULK_COLS = {
+  sku:{head:'SKU (blank = next in series)', match:n=>n.startsWith('sku')||n==='itemcode'},
   name:{head:'Item name*', match:n=>n==='item'||n.startsWith('itemname')||n==='product'||n.startsWith('productname')},
   spec:{head:'Description / spec', match:n=>n.includes('desc')||n.includes('spec')},
   qty:{head:'Qty*', num:true, match:n=>n.startsWith('qty')||n.startsWith('quantity')},
@@ -2902,17 +2991,69 @@ const BULK_COLS = {
   hs:{head:'HS code', match:n=>n.startsWith('hs')},
   lastPrice:{head:'Last price (USD)', num:true, match:n=>n.startsWith('lastprice')},
 };
-const PRODUCT_UPLOAD = ['name','spec','hs','nw','gw','vol','lastPrice'];
-const PO_ITEM_UPLOAD = ['name','spec','qty','price','nw','gw','vol','hs'];
+const PRODUCT_UPLOAD = ['sku','name','spec','hs','nw','gw','vol','lastPrice'];
+const PO_ITEM_UPLOAD = ['sku','name','spec','qty','price','nw','gw','vol','hs'];
 /* Same item name + description (ignoring case, spaces and punctuation) = same product. */
 const productKey = (name, spec) => normHeader(name) + '|' + normHeader(spec);
 const newId = prefix => prefix + '_' + Date.now() + '_' + Math.random().toString(36).slice(2,7);
 
+/* SKUs run SKU-0001, SKU-0002…; a blank SKU gets the next number after the highest one in use. */
+const normSku = s => String(s??'').trim().toUpperCase();
+function skuSeries(products){
+  let n = Math.max(0, ...products.map(p=>{ const m = normSku(p.sku).match(/^SKU-(\d+)$/); return m ? +m[1] : 0; }));
+  return () => 'SKU-' + String(++n).padStart(4, '0');
+}
+
+/* When a product's name, description, weights or volume change, the PO lines that use it follow.
+   Prices, quantities and HS codes on POs are never changed. product field -> PO line field: */
+const PO_SYNC = {name:'item', spec:'spec', nw:'nw', gw:'gw', vol:'vol'};
+function productChanges(before, data){
+  const ch = {};
+  Object.keys(PO_SYNC).forEach(k=>{ if(k in data && String(data[k]??'') !== String(before[k]??'')) ch[k] = data[k]; });
+  return ch;
+}
+function syncLine(l, ch){
+  const nl = {...l};
+  Object.entries(ch).forEach(([k, v])=>{ nl[PO_SYNC[k]] = isBlank(v) ? '' : v; });
+  return nl;
+}
+/* changes: Map of product id -> productChanges(). Returns the POs whose lines would change. */
+function poSyncPlan(changes){
+  const plan = [];
+  state.pos.forEach(po=>{
+    let touched = 0;
+    const lines = (po.lines||[]).map(l=>{
+      const ch = changes.get(l.productId);
+      if(!ch) return l;
+      const nl = syncLine(l, ch);
+      if(Object.values(PO_SYNC).some(k=>nl[k]!==l[k])) touched++;
+      return nl;
+    });
+    if(touched) plan.push({id:po.id, lines, touched});
+  });
+  return plan;
+}
+async function applyPoSync(plan, changes){
+  for(const p of plan) await fb.updateDoc(docRef('purchaseOrders/'+p.id), {lines:p.lines, updatedAt:new Date().toISOString()});
+  // a PO open in the editor gets the same details, so saving it afterwards doesn't undo them
+  if(poOpen) poOpen.draft.lines = poOpen.draft.lines.map(l=>changes.has(l.productId) ? syncLine(l, changes.get(l.productId)) : l);
+}
+const syncSummary = plan => { const n = plan.reduce((t,p)=>t+p.touched, 0); return `${n} item line${n!==1?'s':''} in ${plan.length} PO${plan.length!==1?'s':''}`; };
+
+/* Blank upload sheet, plus a sheet listing every existing product with its SKU to look up or copy from.
+   The reference sheet comes second: uploads read the first sheet with an item-name column. */
 function downloadBulkTemplate(fields, sheetName, filename){
   const ws = XLSX.utils.aoa_to_sheet([fields.map(k=>BULK_COLS[k].head)]);
   ws['!cols'] = fields.map(k=>({wch: k==='name'||k==='spec' ? 34 : 18}));
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, sheetName);
+  const products = state.products.slice().sort(byText(p=>(p.sku ? normSku(p.sku) : '~') + ' ' + productLabel(p)));
+  const ref = XLSX.utils.aoa_to_sheet([
+    ['SKU','Product','Description / spec','HS code','NW per unit (kg)','GW per unit (kg)','Volume per unit (m3)'],
+    ...products.map(p=>[p.sku||'(none yet)', p.name||'', p.spec||'', p.hs||'', ...['nw','gw','vol'].map(k=>isBlank(p[k]) ? '' : p[k])]),
+  ]);
+  ref['!cols'] = [{wch:12},{wch:34},{wch:34},{wch:12},{wch:16},{wch:16},{wch:18}];
+  XLSX.utils.book_append_sheet(wb, ref, 'Existing SKUs');
   const arr = XLSX.write(wb, {bookType:'xlsx', type:'array'});
   downloadBlob(new Blob([arr], {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}), companyLabel(company()).replace(/\s+/g,'-') + '-' + filename);
   showToast('Template ready');
@@ -2980,47 +3121,103 @@ function showChoices(title, bodyHtml, choices){
 }
 const nameList = (names, max=6) => names.slice(0, max).map(escapeHtml).join('<br>') + (names.length>max ? `<br>…and ${names.length-max} more` : '');
 
-/* Products master: new rows are added, rows matching an existing product update it (blank cells leave a value as it is). */
+/* Products master. A row's SKU picks the product it updates, so a file can rename products in bulk;
+   without a SKU, the same name + description does. Anything unmatched is a new product, and a blank
+   SKU gets the next one in the series. Blank cells leave a value as it is. Changed names, descriptions,
+   weights and volumes are copied onto the POs that use the product (never prices). */
 async function uploadProducts(file){
   let rows = null;
   try{ rows = await readBulkFile(file, PRODUCT_UPLOAD); }catch(ex){ console.error(ex); }
   if(!rows || !rows.length){ showToast('No products found: the file needs an "Item name" column'); return; }
-  const existing = new Map(state.products.map(p=>[productKey(p.name, p.spec), p]));
-  const writes = new Map();
-  let added = 0, updated = 0;
+  const bySku = new Map(state.products.filter(p=>p.sku).map(p=>[normSku(p.sku), p]));
+  const byKey = new Map(state.products.map(p=>[productKey(p.name, p.spec), p]));
+  const nextSku = skuSeries([...state.products, ...rows]);   // SKUs typed in the file aren't handed out again
+  const writes = new Map();   // product id -> {id, data, before (null for a new product)}
   rows.forEach(o=>{
-    const key = productKey(o.name, o.spec), data = {};
+    const sku = normSku(o.sku), data = {};
     ['name','spec','hs'].forEach(k=>{ if(o[k]) data[k] = o[k]; });
     ['nw','gw','vol','lastPrice'].forEach(k=>{ if(!isBlank(o[k])) data[k] = o[k]; });
-    if(writes.has(key)){ Object.assign(writes.get(key).data, data); return; }
-    const ex = existing.get(key);
-    if(ex){ writes.set(key, {id:ex.id, data}); updated++; }
-    else{ writes.set(key, {id:newId('prd'), data:{name:o.name, spec:o.spec||'', hs:'', nw:null, gw:null, vol:null, lastPrice:null, ...data}}); added++; }
+    let p = sku ? bySku.get(sku) : null;
+    if(!p){
+      // same name + description: update it, taking the file's SKU if the product has none yet
+      const same = byKey.get(productKey(o.name, o.spec));
+      if(same && (!sku || !same.sku)) p = same;
+    }
+    if(p){
+      const w = writes.get(p.id) || {id:p.id, data:{}, before:p.isNew ? null : p};
+      Object.assign(w.data, data);
+      if(!p.sku && !w.data.sku){ w.data.sku = sku || nextSku(); bySku.set(w.data.sku, p); }
+      writes.set(p.id, w);
+    }else{
+      const np = {id:newId('prd'), isNew:true, sku:sku || nextSku(), name:o.name, spec:o.spec||'', hs:'', nw:null, gw:null, vol:null, lastPrice:null, ...data};
+      const {id, isNew, ...body} = np;
+      writes.set(id, {id, data:body, before:null});
+      bySku.set(np.sku, np);
+      byKey.set(productKey(np.name, np.spec), np);
+    }
   });
-  showChoices(`Upload ${writes.size} product${writes.size!==1?'s':''}?`,
-    `${added} new product${added!==1?'s':''} will be added and ${updated} existing product${updated!==1?'s':''} updated with the file's values. Blank cells leave existing values as they are.`,
+  const list = [...writes.values()];
+  const added = list.filter(w=>!w.before), updated = list.filter(w=>w.before);
+  const changes = new Map();
+  updated.forEach(w=>{ const ch = productChanges(w.before, w.data); if(Object.keys(ch).length) changes.set(w.id, ch); });
+  const renamed = [...changes.values()].filter(ch=>'name' in ch || 'spec' in ch).length;
+  const plan = poSyncPlan(changes);
+  showChoices(`Upload ${list.length} product${list.length!==1?'s':''}?`,
+    `${added.length} new product${added.length!==1?'s':''} will be added and ${updated.length} existing product${updated.length!==1?'s':''} updated${renamed ? ` (${renamed} renamed)` : ''}. Blank cells leave existing values as they are; a blank SKU gets the next number in the series.`
+    + (plan.length ? `<div class="section-note" style="margin:12px 0 0;">Existing POs: ${syncSummary(plan)} will get the new name, description, weights or volume. Prices, quantities and HS codes on the POs stay as they are.</div>` : ''),
     [{label:'Upload', primary:true, run:async ()=>{
-      try{ await writeDocs('products', [...writes.values()]); showToast(`Products uploaded: ${added} new, ${updated} updated`); }
-      catch(ex){ console.error(ex); showToast(ex.code==='permission-denied' ? 'This account can\'t edit products' : 'Upload failed: ' + ex.message); }
+      try{ await writeDocs('products', list.map(({id, data})=>({id, data}))); }
+      catch(ex){ console.error(ex); showToast(ex.code==='permission-denied' ? 'This account can\'t edit products' : 'Upload failed: ' + ex.message); return; }
+      try{ await applyPoSync(plan, changes); }
+      catch(ex){ console.error(ex); showToast('Products saved, but the POs could not be updated' + (ex.code==='permission-denied' ? ': this account can\'t edit purchase orders' : '')); return; }
+      showToast(`Products uploaded: ${added.length} new, ${updated.length} updated` + (plan.length ? ` · ${syncSummary(plan)} updated` : ''));
     }}]);
 }
 
-/* PO items: each row is matched to a product by item name + description; rows that match none
-   create a new product in the master. File values fill the line; blank cells fall back to the product. */
+/* Gives every product without a SKU the next numbers in the series, in name order. */
+async function assignMissingSkus(){
+  const missing = state.products.filter(p=>!p.sku).sort(byText(productLabel));
+  if(!missing.length) return;
+  const nextSku = skuSeries(state.products);
+  try{
+    await writeDocs('products', missing.map(p=>({id:p.id, data:{sku:nextSku()}})));
+    showToast(`SKUs assigned to ${missing.length} product${missing.length!==1?'s':''}`);
+  }catch(ex){ console.error(ex); showToast(ex.code==='permission-denied' ? 'This account can\'t edit products' : 'Could not assign SKUs'); }
+}
+/* The products list in the upload format, to edit and upload again. */
+function downloadProducts(){
+  const rows = state.products.slice().sort(byText(p=>(p.sku ? normSku(p.sku) : '~') + ' ' + productLabel(p)));
+  const ws = XLSX.utils.aoa_to_sheet([PRODUCT_UPLOAD.map(k=>BULK_COLS[k].head),
+    ...rows.map(p=>PRODUCT_UPLOAD.map(k=>isBlank(p[k]) ? '' : p[k]))]);
+  ws['!cols'] = PRODUCT_UPLOAD.map(k=>({wch: k==='name'||k==='spec' ? 34 : k==='sku' ? 26 : 16}));
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Products');
+  const arr = XLSX.write(wb, {bookType:'xlsx', type:'array'});
+  downloadBlob(new Blob([arr], {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}), companyLabel(company()).replace(/\s+/g,'-') + '-Products.xlsx');
+  showToast('Products list ready');
+}
+
+/* PO items: each row is matched to a product by SKU, or without one by item name + description;
+   rows that match none create a new product in the master (a blank SKU gets the next in the series).
+   File values fill the line; blank cells fall back to the product. */
 async function uploadPoItems(file, page){
   const d = poOpen.draft;
   let rows = null;
   try{ rows = await readBulkFile(file, PO_ITEM_UPLOAD); }catch(ex){ console.error(ex); }
   rows = (rows||[]).filter(o=>toNum(o.qty) > 0);
   if(!rows.length){ showToast('No items found: the file needs "Item name" and "Qty" columns'); return; }
-  const existing = new Map(state.products.map(p=>[productKey(p.name, p.spec), p]));
-  const created = new Map();
+  const bySku = new Map(state.products.filter(p=>p.sku).map(p=>[normSku(p.sku), p]));
+  const byKey = new Map(state.products.map(p=>[productKey(p.name, p.spec), p]));
+  const nextSku = skuSeries([...state.products, ...rows]);
+  const created = new Map();   // id -> new product
   const lines = rows.map(o=>{
-    const key = productKey(o.name, o.spec);
-    let p = existing.get(key) || created.get(key);
+    const sku = normSku(o.sku);
+    let p = sku ? bySku.get(sku) : byKey.get(productKey(o.name, o.spec));
     if(!p){
-      p = {id:newId('prd'), name:o.name, spec:o.spec||'', hs:o.hs||'', nw:isBlank(o.nw)?null:o.nw, gw:isBlank(o.gw)?null:o.gw, vol:isBlank(o.vol)?null:o.vol, lastPrice:null};
-      created.set(key, p);
+      p = {id:newId('prd'), sku:sku || nextSku(), name:o.name, spec:o.spec||'', hs:o.hs||'', nw:isBlank(o.nw)?null:o.nw, gw:isBlank(o.gw)?null:o.gw, vol:isBlank(o.vol)?null:o.vol, lastPrice:null};
+      created.set(p.id, p);
+      bySku.set(p.sku, p);
+      byKey.set(productKey(p.name, p.spec), p);
     }
     const pick = (k, fallback) => isBlank(o[k]) ? (isBlank(fallback) ? '' : fallback) : o[k];
     return {productId:p.id, item:p.name, spec:p.spec||'', qty:o.qty, price:pick('price', p.lastPrice),
@@ -3043,8 +3240,8 @@ async function uploadPoItems(file, page){
   };
   const noPrice = lines.filter(l=>isBlank(l.price)).length;
   showChoices(`Upload ${lines.length} item${lines.length!==1?'s':''}?`,
-    `${lines.length - lines.filter(l=>created.has(productKey(l.item, l.spec))).length} match products already in Masters.`
-    + (newProducts.length ? `<div class="section-note" style="margin:12px 0 0;">${newProducts.length} new product${newProducts.length!==1?'s':''} will be added to Masters → Products:<br>${nameList(newProducts.map(productLabel))}</div>` : '')
+    `${lines.filter(l=>!created.has(l.productId)).length} match products already in Masters.`
+    + (newProducts.length ? `<div class="section-note" style="margin:12px 0 0;">${newProducts.length} new product${newProducts.length!==1?'s':''} will be added to Masters → Products:<br>${nameList(newProducts.map(p=>p.sku + ' · ' + productLabel(p)))}</div>` : '')
     + (noPrice ? `<div class="hint" style="margin-top:10px;">${noPrice} item${noPrice!==1?'s have':' has'} no unit price yet.</div>` : ''),
     [...(d.lines.length ? [{label:`Replace the ${d.lines.length} current items`, run:apply(true)}] : []),
      {label:d.lines.length ? 'Add to the end' : 'Upload', primary:true, run:apply(false)}]);
@@ -3055,8 +3252,9 @@ let mastersTab = 'products';
 const mastersQ = {products:'', vendors:'', hscodes:''};
 const dutyPct = (h, apta) => toNum(h.bcd) * (1 - (apta ? toNum(h.apta) : 0)/100) * (1 + toNum(h.sws)/100);
 const MASTERS = {
-  products:{label:'Products', one:'product', coll:'products', sort:productLabel,
+  products:{label:'Products', one:'product', coll:'products', sort:p=>(p.sku ? normSku(p.sku) : '~') + ' ' + productLabel(p),
     fields:[
+      {k:'sku', label:'SKU (blank = next in the series)'},
       {k:'name', label:'Item name', req:true, full:true},
       {k:'spec', label:'Description / spec', full:true},
       {k:'hs', label:'HS code', type:'hs'},
@@ -3066,6 +3264,7 @@ const MASTERS = {
       {k:'lastPrice', label:'Last price paid (USD)', type:'num'},
     ],
     cols:[
+      {label:'SKU', cell:p=>p.sku ? `<b>${escapeHtml(p.sku)}</b>` : '<span class="muted">—</span>'},
       {label:'Item', cls:'ref', cell:p=>`${escapeHtml(p.name)}${p.spec?`<div class="sub">${escapeHtml(p.spec)}</div>`:''}`},
       {label:'HS code', cell:p=>escapeHtml(p.hs||'—')},
       {label:'NW/unit (kg)', num:true, cell:p=>isBlank(p.nw)?'—':fmtQty(p.nw)},
@@ -3073,7 +3272,7 @@ const MASTERS = {
       {label:'Vol/unit (m³)', num:true, cell:p=>isBlank(p.vol)?'—':fmtQty(p.vol,3)},
       {label:'Last price (USD)', num:true, cell:p=>isBlank(p.lastPrice)?'—':fmtFx(p.lastPrice)+(p.lastPo?`<div class="hint">${escapeHtml(p.lastPo)}</div>`:'')},
     ],
-    search:p=>[p.name, p.spec, p.hs].join(' ')},
+    search:p=>[p.sku, p.name, p.spec, p.hs].join(' ')},
   vendors:{label:'Vendors', one:'vendor', coll:'vendors', sort:v=>v.name,
     fields:[
       {k:'name', label:'Company name', req:true, full:true},
@@ -3135,14 +3334,17 @@ function renderMasterList(body, kind){
   const def = MASTERS[kind], all = state[def.coll];
   const q = mastersQ[kind].toLowerCase();
   const rows = all.filter(r=>!q || def.search(r).toLowerCase().includes(q)).sort(byText(def.sort));
+  const noSku = kind==='products' ? all.filter(p=>!p.sku).length : 0;
   body.innerHTML = `
     <div class="toolbar">
       <input type="search" id="m-q" placeholder="Search ${escapeAttr(def.label.toLowerCase())}…" value="${escapeAttr(mastersQ[kind])}">
       <div class="spacer"></div>
       <span class="muted" style="font-size:12px;">${rows.length} of ${all.length}</span>
-      ${kind==='products' ? '<button class="btn btn-sm" id="m-template">Download template</button><button class="btn btn-sm" id="m-upload">Upload products</button><input type="file" id="m-file" accept=".xlsx,.xls,.csv" hidden>' : ''}
+      ${kind==='products' ? '<button class="btn btn-sm" id="m-download">Download products</button><button class="btn btn-sm" id="m-template">Download template</button><button class="btn btn-sm" id="m-upload">Upload products</button><input type="file" id="m-file" accept=".xlsx,.xls,.csv" hidden>' : ''}
       <button class="btn btn-primary btn-sm" id="m-add">+ Add ${escapeHtml(def.one)}</button>
     </div>
+    ${noSku ? `<div class="section-note" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">${noSku} product${noSku!==1?'s don\'t':' doesn\'t'} have a SKU yet.<button class="btn btn-sm" id="m-assign-sku">Assign SKUs</button></div>` : ''}
+    ${kind==='products' ? '<div class="hint" style="margin:-8px 0 12px;">To rename products in bulk: Download products, change the names, descriptions, weights or volume, and upload the file. Rows are matched by SKU, and POs using those products are updated too (prices are never changed).</div>' : ''}
     <div class="table-wrap">
       <table>
         <thead><tr>${def.cols.map(c=>`<th class="${c.num?'num':''}">${escapeHtml(c.label)}</th>`).join('')}<th></th></tr></thead>
@@ -3157,7 +3359,11 @@ function renderMasterList(body, kind){
   document.getElementById('m-add').addEventListener('click', ()=>openMasterModal(kind, null));
   if(kind==='products'){
     const fileIn = document.getElementById('m-file');
+    document.getElementById('m-download').addEventListener('click', downloadProducts);
     document.getElementById('m-template').addEventListener('click', ()=>downloadBulkTemplate(PRODUCT_UPLOAD, 'Products', 'Products-Template.xlsx'));
+    const assign = document.getElementById('m-assign-sku');
+    if(assign) assign.addEventListener('click', ()=>showConfirm(`Assign SKUs to ${noSku} product${noSku!==1?'s':''}?`,
+      'They get the next numbers in the series (SKU-0001, SKU-0002…), in name order.', assignMissingSkus, 'Assign SKUs', true));
     document.getElementById('m-upload').addEventListener('click', ()=>fileIn.click());
     fileIn.addEventListener('change', ()=>{ const f = fileIn.files[0]; fileIn.value = ''; if(f) uploadProducts(f); });
   }
@@ -3227,6 +3433,10 @@ function openMasterModal(kind, id){
       const raw = form.elements[f.k].value;
       data[f.k] = f.type==='num' ? (raw==='' ? null : toNum(raw)) : raw.trim();
     });
+    if(kind==='products'){
+      data.sku = normSku(data.sku) || (r && normSku(r.sku)) || skuSeries(state.products)();
+      if(state.products.some(x=>x.id!==id && normSku(x.sku)===data.sku)){ err.textContent = data.sku + ' is already used by another product.'; return; }
+    }
     let docId = id;
     if(!docId){
       if(def.idField){
@@ -3241,6 +3451,14 @@ function openMasterModal(kind, id){
     try{
       await fb.setDoc(docRef(def.coll+'/'+docId), data, {merge:true});
       overlay.remove();
+      // an edited product's new name, description, weights or volume go onto the POs that use it
+      const changes = new Map(kind==='products' && r ? [[r.id, productChanges(r, data)]] : []);
+      const plan = changes.size && Object.keys(changes.get(r.id)).length ? poSyncPlan(changes) : [];
+      if(plan.length){
+        try{ await applyPoSync(plan, changes); showToast('Saved · ' + syncSummary(plan) + ' updated'); }
+        catch(ex){ console.error(ex); showToast('Saved, but the POs could not be updated' + (ex.code==='permission-denied' ? ': this account can\'t edit purchase orders' : '')); }
+        return;
+      }
       showToast(r ? 'Saved' : def.one[0].toUpperCase() + def.one.slice(1) + ' added');
     }catch(ex){
       console.error(ex);
