@@ -454,9 +454,10 @@ const STATUS_LABELS = {full:'Payment received', partial:'Pending', none:'Pending
 /* Firestore (modular SDK). The module script at the bottom of the page sets
    window.fb = {db, collection, doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, onSnapshot, query, limit}
    and calls startApp() once the user is signed in. */
-/* Companies share users and the app; each has its own data under companies/{id}/. */
+/* Companies share users and the app; each has its own data under companies/{id}/.
+   bizSplit: dashboard pies split Glass vs Lifting; without it they split by channel. */
 const COMPANIES = [
-  {id:'alfa',  name:'Alfa',  suffix:'Enterprises'},
+  {id:'alfa',  name:'Alfa',  suffix:'Enterprises', bizSplit:true},
   {id:'muzaf', name:'Muzaf', suffix:'Enterprise'},
 ];
 const LAST_COMPANY_KEY = 'ledger.company';
@@ -854,6 +855,7 @@ function renderDashboard(page){
   const kGross = known.reduce((t,o)=>t+o.grossSales,0), kCost = known.reduce((t,o)=>t+o.totalCost,0);
   const avgMarkup = kCost>0 ? (kGross/kCost-1)*100 : null;
   const fyText = dashboardFY==='all' ? 'all years' : fyLabel(dashboardFY);
+  const pieBy = company().bizSplit ? 'business' : 'channel';
   const icon = d => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="${d}"/></svg>`;
 
   page.innerHTML = `
@@ -878,8 +880,8 @@ function renderDashboard(page){
       <div class="panel"><h3>Net profit by channel — monthly</h3><div class="panel-chart tall"><canvas id="chChProfit"></canvas></div></div>
     </div>
     <div class="chart-row">
-      <div class="panel"><h3 class="share-title">Sales by business</h3><div class="panel-chart tall"><canvas id="chBizSales"></canvas></div></div>
-      <div class="panel"><h3 class="share-title">Profit by business</h3><div class="panel-chart tall"><canvas id="chBizProfit"></canvas></div></div>
+      <div class="panel"><h3 class="share-title">Sales by ${pieBy}</h3><div class="panel-chart tall"><canvas id="chBizSales"></canvas></div></div>
+      <div class="panel"><h3 class="share-title">Profit by ${pieBy}</h3><div class="panel-chart tall"><canvas id="chBizProfit"></canvas></div></div>
     </div>
   `;
   document.getElementById('dash-fy').addEventListener('change', e=>{ dashboardFY = e.target.value==='all' ? 'all' : parseInt(e.target.value,10); renderDashboard(page); });
@@ -928,7 +930,13 @@ function renderDashboard(page){
     data:{labels, datasets: chCodes.map((c,i)=>({label:chName(c), data:lineBy(known.filter(o=>o.channel===c),o=>o.netProfit), borderColor:col(i), backgroundColor:col(i), tension:.3, pointRadius:3}))},
     options:axisOpts()
   });
-  // 4. business split pies
+  // 4. share pies: by channel (same colours as the channel charts above), or Glass vs Lifting
+  if(!company().bizSplit){
+    const chNet = c => known.filter(o=>o.channel===c).reduce((t,o)=>t+o.netProfit,0);
+    charts.bizSales = shareChart('chBizSales', chCodes.map(chName), chCodes.map(c=>chTotals[c]), false);
+    charts.bizProfit = shareChart('chBizProfit', chCodes.map(chName), chCodes.map(chNet), false);
+    return;
+  }
   const biz = {Lifting:{gross:0,net:0}, Glass:{gross:0,net:0}};
   orders.forEach(o=>{ const b=biz[businessOf(o.channel)]; b.gross+=o.grossSales; if(o.netProfit!==null) b.net+=o.netProfit; });
   charts.bizSales = shareChart('chBizSales', ['Glass','Lifting'], [biz.Glass.gross, biz.Lifting.gross], false);
