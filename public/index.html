@@ -294,6 +294,8 @@ td.ref .sub{font-size:11px;color:var(--ink-faint);font-family:'IBM Plex Sans',sa
 /* ---- purchasing ---- */
 .po-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:0 12px;}
 .po-grid .span2{grid-column:span 2;}
+.po-grid .span3{grid-column:span 3;}
+.po-grid .span4{grid-column:1/-1;}
 .po-form{display:grid;grid-template-columns:1fr 1fr;gap:0 12px;}
 .po-form .full{grid-column:1/-1;}
 .po-table th{padding:9px 8px;}
@@ -314,7 +316,7 @@ h3.po-sec{margin:0;font-size:15px;font-weight:600;color:var(--accent-ink);}
 .charge-row input.n{text-align:right;font-family:'IBM Plex Mono',monospace;}
 .check-inline{display:flex;align-items:center;gap:8px;margin:2px 0 0;font-size:13px;color:var(--ink);font-weight:400;cursor:pointer;}
 .check-inline input{width:auto;}
-@media (max-width:900px){ .po-kpis{grid-template-columns:repeat(2,1fr);} .po-grid{grid-template-columns:1fr 1fr;} .po-form{grid-template-columns:1fr;} }
+@media (max-width:900px){ .po-kpis{grid-template-columns:repeat(2,1fr);} .po-grid{grid-template-columns:1fr 1fr;} .po-grid .span3{grid-column:span 2;} .po-form{grid-template-columns:1fr;} }
 
 @media (max-width:900px){
   #sidebar{position:fixed;left:0;top:0;bottom:0;transform:translateX(-100%);transition:transform .2s;z-index:150;}
@@ -2249,7 +2251,7 @@ function renderPurchase(page){
     </div>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>PO number</th><th>Vendor</th><th class="num">Items</th><th class="num">Qty</th><th class="num">FOB</th><th class="num">Landed basic cost</th><th>Status</th></tr></thead>
+        <thead><tr><th>PO number</th><th>Vendor</th><th class="num">Items</th><th class="num">Qty</th><th class="num">FOB</th><th class="num">Landed basic cost</th><th>Status</th><th></th></tr></thead>
         <tbody>
         ${pos.map(p=>{
           const c = computePO(p), st = PO_STATUS[p.status] || PO_STATUS.draft;
@@ -2261,15 +2263,21 @@ function renderPurchase(page){
             <td class="num">${escapeHtml(p.currency||'USD')} ${fmtFx(c.totals.fob)}</td>
             <td class="num">${fmtMoney(c.totals.landed)}</td>
             <td><span class="pill ${st.pill}">${st.label}</span></td>
+            <td style="text-align:right;">${String(p.beNumber||'').trim()
+              ? `<button class="icon-btn po-be-add" data-id="${escapeAttr(p.id)}" title="Edit Bill of Entry no. / interest">✎</button><button class="btn btn-sm po-be" data-id="${escapeAttr(p.id)}" title="Bill of Entry ${escapeAttr(p.beNumber)}: duty sheet (Excel)">Generate BE</button><button class="btn btn-sm po-eway" data-id="${escapeAttr(p.id)}" title="E-way bill details by HS code (Excel)">Generate E-way bill</button>`
+              : `<button class="btn btn-sm po-be-add" data-id="${escapeAttr(p.id)}" title="Add the Bill of Entry number to generate the BE sheet">Add BE no.</button>`}</td>
           </tr>`;
-        }).join('') || `<tr><td colspan="7" class="empty">${state.pos.length ? 'No POs match.' : 'No purchase orders yet. Use "+ New PO" to make one.'}</td></tr>`}
+        }).join('') || `<tr><td colspan="8" class="empty">${state.pos.length ? 'No POs match.' : 'No purchase orders yet. Use "+ New PO" to make one.'}</td></tr>`}
         </tbody>
       </table>
     </div>`;
   document.getElementById('po-new').addEventListener('click', ()=>openPo(null));
   document.getElementById('po-q').addEventListener('input', e=>{ poFilters.q = e.target.value; renderPurchase(page); const el = document.getElementById('po-q'); el.focus(); el.setSelectionRange(el.value.length, el.value.length); });
   document.getElementById('po-status').addEventListener('change', e=>{ poFilters.status = e.target.value; renderPurchase(page); });
-  page.querySelectorAll('tbody tr[data-id]').forEach(tr=>tr.addEventListener('click', ()=>openPo(tr.dataset.id)));
+  page.querySelectorAll('tbody tr[data-id]').forEach(tr=>tr.addEventListener('click', e=>{ if(!e.target.closest('.po-be, .po-be-add, .po-eway')) openPo(tr.dataset.id); }));
+  page.querySelectorAll('.po-be').forEach(b=>b.addEventListener('click', ()=>{ const po = state.pos.find(p=>p.id===b.dataset.id); if(po) exportBillOfEntry(po); }));
+  page.querySelectorAll('.po-eway').forEach(b=>b.addEventListener('click', ()=>{ const po = state.pos.find(p=>p.id===b.dataset.id); if(po) exportEwayBill(po); }));
+  page.querySelectorAll('.po-be-add').forEach(b=>b.addEventListener('click', ()=>openBeNumberModal(b.dataset.id)));
 }
 
 function newPoDraft(){
@@ -2280,7 +2288,7 @@ function newPoDraft(){
     vendorId:'', paymentTerms:'', currency:'USD', deliveryTerms:'FOB', port:'',
     rate:'', freight:0, insurance:0, claimApta:true,
     charges:s.chargeHeads.map(label=>({label, amount:0})), lines:[], terms:s.terms,
-    piNumber:'', piDate:'', priceBasis:s.priceBasis, shipment:s.shipment, packing:s.packing,
+    beNumber:'', beDate:'', piNumber:'', piDate:'', priceBasis:s.priceBasis, shipment:s.shipment, packing:s.packing,
   };
 }
 function openPo(id){
@@ -2370,8 +2378,12 @@ function renderPoEditor(page){
         ${field('insurance',`Insurance (${escapeHtml(cur)})`,'number')}
       </div>
       <label class="check-inline"><input type="checkbox" data-fk="h-claimApta" data-h="claimApta" ${d.claimApta?'checked':''}> Claim APTA concession: reduces BCD by each HS code's APTA % (needs a certificate of origin)</label>
-      <h3 style="margin-top:20px;">For the PO for customs</h3>
+      <h3 style="margin-top:20px;">Customs</h3>
       <div class="po-grid">
+        ${field('beNumber','Bill of Entry no.')}
+        ${field('beDate','Bill of Entry date','date')}
+        ${field('beInterest','Interest on Bill of Entry (₹)','number')}
+        <div class="field span4 hint" style="margin-top:-6px;">The BE no. is needed for "Generate BE" in the POs list. Interest is added to Other charges. The fields below are printed on the PO for customs.</div>
         ${field('piNumber','Proforma invoice / S/C no.')}
         ${field('piDate','Invoice date','date')}
         ${field('priceBasis','Price basis','text','span2')}
@@ -2459,7 +2471,11 @@ function renderPoEditor(page){
       <div class="panel">
         <h3>Other charges (₹)</h3>
         <div class="settings-list">
-          ${(d.charges||[]).map((ch,i)=>`<div class="charge-row">
+          ${(d.charges||[]).map((ch,i)=>ch.source==='beInterest' ? `<div class="charge-row" title="Set by the Interest on Bill of Entry field in Customs above">
+            <input value="${escapeAttr(ch.label||'')}" disabled>
+            <input class="n" value="${escapeAttr(ch.amount??'')}" disabled>
+            <span class="hint" style="margin:0;">auto</span>
+          </div>` : `<div class="charge-row">
             <input data-fk="c${i}-label" data-ci="${i}" data-cf="label" value="${escapeAttr(ch.label||'')}">
             <input class="n" type="number" step="any" data-fk="c${i}-amount" data-ci="${i}" data-cf="amount" value="${escapeAttr(ch.amount??'')}">
             <button class="icon-btn po-del-charge" data-ci="${i}" title="Remove charge">✕</button>
@@ -2480,8 +2496,9 @@ function renderPoEditor(page){
   page.querySelectorAll('[data-h]').forEach(el=>el.addEventListener('change', ()=>edit(()=>{
     const k = el.dataset.h;
     if(el.type==='checkbox') d[k] = el.checked;
-    else if(['rate','freight','insurance'].includes(k)) d[k] = el.value==='' ? '' : toNum(el.value);
+    else if(['rate','freight','insurance','beInterest'].includes(k)) d[k] = el.value==='' ? '' : toNum(el.value);
     else d[k] = el.value;
+    if(k==='beInterest') d.charges = withBeInterest(d.charges, d.beInterest);
     if(k==='vendorId'){
       const v = vendorById(d.vendorId);
       if(v){ d.paymentTerms = v.paymentTerms || d.paymentTerms; d.currency = v.currency || d.currency; d.port = v.port || d.port; }
@@ -2788,6 +2805,163 @@ function customsPoParts(d){
   };
 }
 
+/* Interest on the Bill of Entry is kept as an automatic line in the PO's other charges, so it is part of landed cost. */
+function withBeInterest(charges, amount){
+  const list = (charges||[]).filter(ch=>ch.source!=='beInterest');
+  if(toNum(amount)) list.push({label:'Interest (Bill of Entry)', amount:toNum(amount), source:'beInterest'});
+  return list;
+}
+
+/* Asks for a PO's Bill of Entry number (and any interest) from the POs list; once saved the row offers Generate BE. */
+function openBeNumberModal(id){
+  const po = state.pos.find(p=>p.id===id);
+  if(!po) return;
+  closeAllOverlays();
+  const overlay = document.createElement('div');
+  overlay.className = 'overlay';
+  overlay.style.alignItems = 'center';
+  overlay.innerHTML = `
+    <div class="modal" style="max-width:380px;">
+      <h2 style="font-size:17px;">Bill of Entry for ${escapeHtml(po.poNumber)}</h2>
+      <form id="be-form">
+        <div class="field"><label>Bill of Entry no.</label><input name="be" required autocomplete="off" value="${escapeAttr(po.beNumber||'')}"></div>
+        <div class="field"><label>Bill of Entry date</label><input name="beDate" type="date" value="${escapeAttr(po.beDate||'')}"></div>
+        <div class="field"><label>Interest amount (₹, optional)</label><input name="interest" type="number" step="any" min="0" value="${escapeAttr(po.beInterest??'')}"></div>
+        <div class="hint" style="margin:-8px 0 8px;">Interest is added to the PO's Other charges, so it is included in landed cost.</div>
+        <p id="be-error" style="color:var(--negative);font-size:13px;margin:0;min-height:18px;"></p>
+        <div class="modal-foot">
+          <button type="button" class="btn" id="be-cancel">Cancel</button>
+          <button type="submit" class="btn btn-primary">Save</button>
+        </div>
+      </form>
+    </div>`;
+  document.body.appendChild(overlay);
+  const form = overlay.querySelector('#be-form');
+  form.elements.be.focus();
+  overlay.addEventListener('click', e=>{ if(e.target===overlay) overlay.remove(); });
+  overlay.querySelector('#be-cancel').addEventListener('click', ()=>overlay.remove());
+  form.addEventListener('submit', async e=>{
+    e.preventDefault();
+    const beNumber = form.elements.be.value.trim();
+    const beInterest = form.elements.interest.value==='' ? '' : toNum(form.elements.interest.value);
+    const beDate = form.elements.beDate.value;
+    if(!beNumber) return;
+    try{
+      await fb.updateDoc(docRef('purchaseOrders/'+id), {beNumber, beDate, beInterest, charges:withBeInterest(po.charges, beInterest), updatedAt:new Date().toISOString()});
+      // an open, unsaved copy of this PO keeps them too
+      if(poOpen && poOpen.id===id) Object.assign(poOpen.draft, {beNumber, beDate, beInterest, charges:withBeInterest(poOpen.draft.charges, beInterest)});
+      overlay.remove();
+      showToast('Bill of Entry no. saved');
+    }catch(ex){
+      console.error(ex);
+      overlay.querySelector('#be-error').textContent = ex.code==='permission-denied' ? 'This account can\'t edit purchase orders.' : 'Could not save. ' + (ex.message||'');
+    }
+  });
+}
+
+/* Bill of Entry working: duty per item. Grand total = IGST assessable value + IGST amount.
+   Only offered once the PO has a Bill of Entry number. */
+async function exportBillOfEntry(po){
+  if(!String(po.beNumber||'').trim()){ showToast('Add the Bill of Entry no. first'); return; }
+  let ExcelJS;
+  try{ ExcelJS = await loadExcelJs(); }catch(ex){ showToast(ex.message); return; }
+  const c = computePO(po), t = c.totals, cur = po.currency || 'USD';
+  const head = ['#','Item name','Qty','HS code','BCD','SWS','IGST assessable value','IGST amount','Grand total'];
+  const N = head.length;
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet('Bill of Entry', {views:[{showGridLines:false}],
+    pageSetup:{orientation:'landscape', paperSize:9, fitToPage:true, fitToWidth:1, fitToHeight:0}});
+  ws.columns = [5, 46, 8, 12, 14, 13, 20, 15, 16].map(width=>({width}));
+  const k = xlKit(ws);
+  let r = 1;
+  k.put(r, 1, N, `BILL OF ENTRY ${po.beNumber}  ·  DUTY WORKING  ·  ${po.poNumber}`, {fill:XL.navy, font:{bold:true, size:15, color:{argb:XL.white}}, align:{horizontal:'left', indent:1}}); ws.getRow(r++).height = 28;
+  r++;
+  const left = [['Bill of Entry no.', po.beNumber||''], ['Bill of Entry date', po.beDate ? fmtDate(po.beDate) : ''], ['PO number', po.poNumber], ['Vendor', poVendor(po).name||''], ['PO date', fmtDate(po.date)], ['Proforma invoice', po.piNumber||'']];
+  const right = [[`Exchange rate (₹ per ${cur})`, toNum(po.rate), XL_FMT.dec], [`CIF value (${cur})`, round2(t.cifUsd), XL_FMT.usd], ['CIF value (₹)', round2(t.cifInr), XL_FMT.inr2], ['APTA claimed', po.claimApta ? 'Yes' : 'No']];
+  left.forEach(([l, v], i)=>{
+    k.label(r, 1, 2, l); k.put(r, 3, 4, v, i===0 ? {font:{bold:true}} : {});
+    if(right[i]){ k.label(r, 6, 7, right[i][0]); k.put(r, 8, 9, right[i][1], {fmt:right[i][2]}); }
+    r++;
+  });
+  r++;
+  k.header(r++, head);
+  const fm = [XL_FMT.num, null, XL_FMT.num, null, XL_FMT.inr2, XL_FMT.inr2, XL_FMT.inr2, XL_FMT.inr2, XL_FMT.inr2];
+  (po.lines||[]).forEach((l, i)=>{
+    const x = c.rows[i];
+    k.line(r++, [i+1, productLabel({name:l.item, spec:l.spec}), toNum(l.qty), l.hs||'', round2(x.bcd), round2(x.sws), round2(x.assess), round2(x.igst), round2(x.assess + x.igst)],
+      fm, {fill:i%2 ? XL.zebra : null, bold:[8]});
+  });
+  const tot = {fill:XL.total, font:{bold:true}};
+  ['TOTAL', '', t.qty, '', round2(t.bcd), round2(t.sws), round2(t.assess), round2(t.igst)].forEach((v, i)=>k.put(r, i+1, i+1, v, {...tot, fmt:fm[i]}));
+  k.put(r, 9, 9, round2(t.assess + t.igst), {fill:XL.amber, font:{bold:true, size:12}, fmt:fm[8]}); ws.getRow(r).height = 20;
+  ws.views = [{state:'frozen', ySplit:r - (po.lines||[]).length - 1, showGridLines:false}];
+  const interest = toNum(po.beInterest);
+  if(interest){
+    r++;
+    k.put(r, 1, 8, 'Interest on Bill of Entry', {font:{bold:true}, align:{horizontal:'right'}}); k.put(r, 9, 9, round2(interest), {font:{bold:true}, fmt:fm[8]}); r++;
+    k.put(r, 1, 8, 'Grand total incl. interest', {fill:XL.total, font:{bold:true}, align:{horizontal:'right'}});
+    k.put(r, 9, 9, round2(t.assess + t.igst + interest), {fill:XL.amber, font:{bold:true, size:12}, fmt:fm[8]}); ws.getRow(r).height = 20;
+  }
+  await saveWorkbook(wb, (po.poNumber||'PO').replace(/[^\w.-]+/g,'-') + '-BE.xlsx');
+  showToast('Bill of Entry sheet ready');
+}
+
+/* E-way bill details: items combined by HS code (and unit) under the HS code's description from the master.
+   Taxable value = the HS code's total IGST assessable value; the IGST rate comes from the HS code. */
+function ewayItems(po){
+  const c = computePO(po), groups = new Map();
+  (po.lines||[]).forEach((l, i)=>{
+    const p = state.products.find(x=>x.id===l.productId);
+    const unit = String((p && p.unit) || 'PCS').toUpperCase(), hs = String(l.hs||'');
+    const key = hs + '|' + unit;
+    if(!groups.has(key)){
+      const h = hsByCode(hs), rate = poRate(po, hs);
+      groups.set(key, {hs, unit, name:(h && h.description) || (hs ? 'HS ' + hs : 'Other (no HS code)'), qty:0, taxable:0, igst:0, rate:rate ? toNum(rate.igst) : 0});
+    }
+    const g = groups.get(key);
+    g.qty += toNum(l.qty); g.taxable += c.rows[i].assess; g.igst += c.rows[i].igst;
+  });
+  return [...groups.values()].sort(byText(g=>g.hs + ' ' + g.unit));
+}
+async function exportEwayBill(po){
+  if(!String(po.beNumber||'').trim()){ showToast('Add the Bill of Entry no. first'); return; }
+  let ExcelJS;
+  try{ ExcelJS = await loadExcelJs(); }catch(ex){ showToast(ex.message); return; }
+  const v = poVendor(po), b = poSettings().buyer, items = ewayItems(po);
+  const head = ['#','Item name','HS code','Qty','Unit','Taxable value (₹)','IGST rate','IGST amount (₹)','Total value (₹)'];
+  const N = head.length;
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet('E-way bill', {views:[{showGridLines:false}],
+    pageSetup:{orientation:'landscape', paperSize:9, fitToPage:true, fitToWidth:1, fitToHeight:0}});
+  ws.columns = [5, 44, 12, 10, 8, 18, 10, 17, 18].map(width=>({width}));
+  const k = xlKit(ws);
+  let r = 1;
+  k.put(r, 1, N, `E-WAY BILL DETAILS  ·  BE ${po.beNumber}  ·  ${po.poNumber}`, {fill:XL.navy, font:{bold:true, size:15, color:{argb:XL.white}}, align:{horizontal:'left', indent:1}}); ws.getRow(r++).height = 28;
+  r++;
+  const rows = [
+    ['BE number', po.beNumber],
+    ['BE date', po.beDate ? fmtDate(po.beDate) : ''],
+    ['Bill from (supplier)', v.name || ''],
+    ['Dispatch from (supplier address)', [String(v.address||'').replace(/\s*,?\s*\n\s*/g, ', '), v.country].filter(Boolean).join(', ')],
+    ['Bill to', [b.name || companyLabel(company()), b.gstin && 'GSTIN ' + b.gstin].filter(Boolean).join('  ·  ')],
+  ];
+  rows.forEach(([label, val])=>{ k.label(r, 1, 3, label); k.put(r, 4, N, val, label==='BE number' ? {font:{bold:true}} : {}); k.fit(r++, [[val, 90]]); });
+  r++;
+  const headRow = r;
+  k.header(r++, head);
+  const fm = [XL_FMT.num, null, null, XL_FMT.num, null, XL_FMT.inr2, XL_FMT.pct, XL_FMT.inr2, XL_FMT.inr2];
+  items.forEach((g, i)=>{
+    k.line(r++, [i+1, g.name, g.hs, g.qty, g.unit, round2(g.taxable), g.rate, round2(g.igst), round2(g.taxable + g.igst)], fm, {fill:i%2 ? XL.zebra : null, bold:[1]});
+  });
+  const sum = f => round2(items.reduce((t,g)=>t+f(g), 0));
+  const tot = {fill:XL.total, font:{bold:true}};
+  ['TOTAL', '', '', sum(g=>g.qty), '', sum(g=>g.taxable), '', sum(g=>g.igst)].forEach((val, i)=>k.put(r, i+1, i+1, val, {...tot, fmt:fm[i]}));
+  k.put(r, 9, 9, sum(g=>g.taxable + g.igst), {fill:XL.amber, font:{bold:true, size:12}, fmt:fm[8]}); ws.getRow(r).height = 20;
+  ws.views = [{state:'frozen', ySplit:headRow, showGridLines:false}];
+  await saveWorkbook(wb, (po.poNumber||'PO').replace(/[^\w.-]+/g,'-') + '-Eway.xlsx');
+  showToast('E-way bill details ready');
+}
+
 /* PO for customs as a workbook, laid out like the printout (portrait A4, page numbers in the footer). */
 async function exportCustomsPo(d){
   let ExcelJS;
@@ -2981,6 +3155,7 @@ async function exportPoCosting(d){
 /* ---------------- Bulk upload: products master and PO items ---------------- */
 const BULK_COLS = {
   sku:{head:'SKU (blank = next in series)', match:n=>n.startsWith('sku')||n==='itemcode'},
+  unit:{head:'Unit (blank = PCS)', match:n=>n==='unit'||n.startsWith('unitblank')||n==='uom'},
   name:{head:'Item name*', match:n=>n==='item'||n.startsWith('itemname')||n==='product'||n.startsWith('productname')},
   spec:{head:'Description / spec', match:n=>n.includes('desc')||n.includes('spec')},
   qty:{head:'Qty*', num:true, match:n=>n.startsWith('qty')||n.startsWith('quantity')},
@@ -2991,7 +3166,7 @@ const BULK_COLS = {
   hs:{head:'HS code', match:n=>n.startsWith('hs')},
   lastPrice:{head:'Last price (USD)', num:true, match:n=>n.startsWith('lastprice')},
 };
-const PRODUCT_UPLOAD = ['sku','name','spec','hs','nw','gw','vol','lastPrice'];
+const PRODUCT_UPLOAD = ['sku','name','spec','unit','hs','nw','gw','vol','lastPrice'];
 const PO_ITEM_UPLOAD = ['sku','name','spec','qty','price','nw','gw','vol','hs'];
 /* Same item name + description (ignoring case, spaces and punctuation) = same product. */
 const productKey = (name, spec) => normHeader(name) + '|' + normHeader(spec);
@@ -3136,6 +3311,7 @@ async function uploadProducts(file){
   rows.forEach(o=>{
     const sku = normSku(o.sku), data = {};
     ['name','spec','hs'].forEach(k=>{ if(o[k]) data[k] = o[k]; });
+    if(o.unit) data.unit = o.unit.toUpperCase();
     ['nw','gw','vol','lastPrice'].forEach(k=>{ if(!isBlank(o[k])) data[k] = o[k]; });
     let p = sku ? bySku.get(sku) : null;
     if(!p){
@@ -3257,6 +3433,7 @@ const MASTERS = {
       {k:'sku', label:'SKU (blank = next in the series)'},
       {k:'name', label:'Item name', req:true, full:true},
       {k:'spec', label:'Description / spec', full:true},
+      {k:'unit', label:'Unit (blank = PCS)'},
       {k:'hs', label:'HS code', type:'hs'},
       {k:'nw', label:'Net weight per unit (kg)', type:'num'},
       {k:'gw', label:'Gross weight per unit (kg)', type:'num'},
@@ -3266,6 +3443,7 @@ const MASTERS = {
     cols:[
       {label:'SKU', cell:p=>p.sku ? `<b>${escapeHtml(p.sku)}</b>` : '<span class="muted">—</span>'},
       {label:'Item', cls:'ref', cell:p=>`${escapeHtml(p.name)}${p.spec?`<div class="sub">${escapeHtml(p.spec)}</div>`:''}`},
+      {label:'Unit', cell:p=>escapeHtml(p.unit||'PCS')},
       {label:'HS code', cell:p=>escapeHtml(p.hs||'—')},
       {label:'NW/unit (kg)', num:true, cell:p=>isBlank(p.nw)?'—':fmtQty(p.nw)},
       {label:'GW/unit (kg)', num:true, cell:p=>isBlank(p.gw)?'—':fmtQty(p.gw)},
@@ -3435,6 +3613,7 @@ function openMasterModal(kind, id){
     });
     if(kind==='products'){
       data.sku = normSku(data.sku) || (r && normSku(r.sku)) || skuSeries(state.products)();
+      data.unit = (data.unit||'').toUpperCase();
       if(state.products.some(x=>x.id!==id && normSku(x.sku)===data.sku)){ err.textContent = data.sku + ' is already used by another product.'; return; }
     }
     let docId = id;
