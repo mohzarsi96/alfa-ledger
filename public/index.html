@@ -2773,7 +2773,8 @@ function xlKit(ws){
     cell.value = value;
     if(st.font) cell.font = st.font;
     if(st.fmt) cell.numFmt = st.fmt;
-    cell.alignment = {vertical:'middle', wrapText:true, ...(typeof value==='number' ? {horizontal:'right'} : {}), ...(st.align||{})};
+    const numeric = typeof value==='number' || (value && typeof value==='object' && 'formula' in value);
+    cell.alignment = {vertical:'middle', wrapText:true, ...(numeric ? {horizontal:'right'} : {}), ...(st.align||{})};
     return cell;
   };
   const band = (r, c1, c2, text) => put(r, c1, c2, text, {fill:XL.navy, font:{bold:true, color:{argb:XL.white}}});
@@ -2821,18 +2822,29 @@ async function exportSupplierPo(d){
   k.header(r++, ['#','Item','Description / spec','HS code','Qty',`Unit price (${cur})`,`Amount (${cur}) ${d.deliveryTerms||''}`.trim(),
     'NW/unit (kg)','GW/unit (kg)','Vol/unit (m³)','Total NW (kg)','Total GW (kg)','Total vol (m³)']);
   const fm = [XL_FMT.num, null, null, null, XL_FMT.num, XL_FMT.usd, XL_FMT.usd, XL_FMT.num, XL_FMT.num, XL_FMT.vol, XL_FMT.dec, XL_FMT.dec, XL_FMT.vol];
+  // Amounts and totals are live formulas, so editing a qty or price in Excel recalculates the PO.
+  // N() treats a blank cell as 0. `result` is the cached value shown before Excel recalculates.
+  const f = (formula, result) => ({formula, result});
+  const first = r;
   d.lines.forEach((l,i)=>{
     const q = toNum(l.qty);
-    k.line(r++, [i+1, l.item||'', l.spec||'', l.hs||'', q, n(l.price), r2(c.rows[i].fob), n(l.nw), n(l.gw), n(l.vol), r2(toNum(l.nw)*q), r2(toNum(l.gw)*q), r2(toNum(l.vol)*q)],
+    k.line(r, [i+1, l.item||'', l.spec||'', l.hs||'', q, n(l.price),
+      f(`N(E${r})*N(F${r})`, r2(c.rows[i].fob)), n(l.nw), n(l.gw), n(l.vol),
+      f(`N(H${r})*N(E${r})`, r2(toNum(l.nw)*q)), f(`N(I${r})*N(E${r})`, r2(toNum(l.gw)*q)), f(`N(J${r})*N(E${r})`, r2(toNum(l.vol)*q))],
       fm, {fill:i%2 ? XL.zebra : null, bold:[1]});
+    r++;
   });
+  const last = r - 1, sum = col => d.lines.length ? `SUM(${col}${first}:${col}${last})` : '0';
   const tot = {fill:XL.total, font:{bold:true}};
-  k.put(r, 1, 4, 'TOTAL FOB', {...tot, align:{horizontal:'right'}}); k.put(r, 5, 5, t.qty, {...tot, fmt:XL_FMT.num}); k.put(r, 6, 6, '', tot);
-  k.put(r, 7, 7, r2(t.fob), {...tot, fmt:XL_FMT.usd}); k.put(r, 8, 10, '', tot);
-  k.put(r, 11, 11, r2(t.nw), {...tot, fmt:XL_FMT.dec}); k.put(r, 12, 12, r2(t.gw), {...tot, fmt:XL_FMT.dec}); k.put(r, 13, 13, r2(t.vol), {...tot, fmt:XL_FMT.vol}); r++;
-  k.put(r, 1, 6, 'Freight + insurance', {font:{bold:true}, align:{horizontal:'right'}}); k.put(r, 7, 7, r2(toNum(d.freight) + toNum(d.insurance)), {font:{bold:true}, fmt:XL_FMT.usd}); r++;
+  const fobRow = r;
+  k.put(r, 1, 4, 'TOTAL FOB', {...tot, align:{horizontal:'right'}}); k.put(r, 5, 5, f(sum('E'), t.qty), {...tot, fmt:XL_FMT.num}); k.put(r, 6, 6, '', tot);
+  k.put(r, 7, 7, f(sum('G'), r2(t.fob)), {...tot, fmt:XL_FMT.usd}); k.put(r, 8, 10, '', tot);
+  k.put(r, 11, 11, f(sum('K'), r2(t.nw)), {...tot, fmt:XL_FMT.dec}); k.put(r, 12, 12, f(sum('L'), r2(t.gw)), {...tot, fmt:XL_FMT.dec}); k.put(r, 13, 13, f(sum('M'), r2(t.vol)), {...tot, fmt:XL_FMT.vol}); r++;
+  const freightRow = r;
+  k.put(r, 1, 6, 'Freight + insurance', {font:{bold:true}, align:{horizontal:'right'}});
+  k.put(r, 7, 7, f(`${r2(toNum(d.freight))}+${r2(toNum(d.insurance))}`, r2(toNum(d.freight) + toNum(d.insurance))), {font:{bold:true}, fmt:XL_FMT.usd}); r++;
   k.put(r, 1, 6, `TOTAL CIF VALUE (${cur})`, {fill:XL.amber, font:{bold:true, size:12}, align:{horizontal:'right'}});
-  k.put(r, 7, 7, r2(t.cifUsd), {fill:XL.amber, font:{bold:true, size:12}, fmt:XL_FMT.usd}); ws.getRow(r++).height = 22;
+  k.put(r, 7, 7, f(`G${fobRow}+G${freightRow}`, r2(t.cifUsd)), {fill:XL.amber, font:{bold:true, size:12}, fmt:XL_FMT.usd}); ws.getRow(r++).height = 22;
   const bank = vendorBankRows(v);
   if(bank.length){
     r++; k.band(r++, 1, N, 'SUPPLIER BANK DETAILS');
