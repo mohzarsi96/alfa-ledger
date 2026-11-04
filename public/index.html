@@ -2643,18 +2643,26 @@ async function savePo(page){
     return;
   }
   poOpen = {id, draft:JSON.parse(JSON.stringify(body)), dirty:false};
-  // Ordered and received POs set each product's last price.
-  if(d.status!=='draft'){
+  // Ordered and received POs set each product's last price (USD) in the master,
+  // unless the product's price already comes from a newer PO.
+  let priced = 0, failed = 0;
+  if(d.status!=='draft' && (d.currency || 'USD').toUpperCase()==='USD'){
+    const done = new Set();
     for(const l of d.lines){
       const p = state.products.find(x=>x.id===l.productId);
-      if(p && !isBlank(l.price) && (toNum(p.lastPrice)!==toNum(l.price) || p.lastPo!==d.poNumber)){
-        try{ await fb.updateDoc(docRef('products/'+p.id), {lastPrice:toNum(l.price), lastPo:d.poNumber}); }
-        catch(ex){ console.error('last price update failed', ex); }
-      }
+      if(!p || isBlank(l.price) || done.has(p.id)) continue;
+      done.add(p.id);
+      const from = p.lastPo && p.lastPo!==d.poNumber ? state.pos.find(x=>x.poNumber===p.lastPo) : null;
+      if(from && from.status!=='draft' && String(from.date||'') > String(d.date||'')) continue;
+      if(toNum(p.lastPrice)===toNum(l.price) && p.lastPo===d.poNumber) continue;
+      try{ await fb.updateDoc(docRef('products/'+p.id), {lastPrice:toNum(l.price), lastPo:d.poNumber}); priced++; }
+      catch(ex){ console.error('last price update failed', ex); failed++; }
     }
   }
   renderPoEditor(page);
-  showToast(d.poNumber + ' saved');
+  showToast(d.poNumber + ' saved'
+    + (priced ? ` · USD price updated on ${priced} product${priced!==1?'s':''} in the master` : '')
+    + (failed ? ` · ${failed} product price${failed!==1?'s':''} could not be updated` : ''));
 }
 
 /* Beneficiary bank lines for the supplier PO; empty when the vendor has no bank details. */
