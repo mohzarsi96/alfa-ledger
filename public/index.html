@@ -832,6 +832,12 @@ function closeTopOverlay(){
 document.addEventListener('keydown', e=>{
   if(e.key==='Escape') closeTopOverlay();
 });
+// The mouse wheel over a focused number box would change its value (a PO rate, qty, freight…).
+// Leaving the box first means the wheel just scrolls the page.
+document.addEventListener('wheel', e=>{
+  const el = e.target;
+  if(el instanceof HTMLInputElement && el.type==='number' && document.activeElement===el) el.blur();
+}, {passive:true});
 document.getElementById('menu-btn').addEventListener('click', ()=> document.getElementById('sidebar').classList.toggle('open'));
 
 /* ============================================================
