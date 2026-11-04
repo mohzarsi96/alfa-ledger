@@ -305,6 +305,14 @@ td.ref .sub{font-size:11px;color:var(--ink-faint);font-family:'IBM Plex Sans',sa
 .po-table input.n{width:84px;text-align:right;font-family:'IBM Plex Mono',monospace;}
 .po-table input.sp{width:92px;}
 .row-new td,.charge-row.row-new{animation:rowFlash 1.8s ease;}
+/* Drag the ⋮⋮ handle on a PO item to move it up or down. */
+.drag-handle{cursor:grab;user-select:none;touch-action:none;white-space:nowrap;}
+.drag-handle .grip{color:#94a3b8;margin-right:5px;letter-spacing:-2px;font-weight:700;}
+.drag-handle:hover .grip{color:#2563eb;}
+body.po-dragging,body.po-dragging *{cursor:grabbing !important;user-select:none;}
+tr.dragging td{background:#eff6ff;opacity:.55;}
+tr.drop-before td{box-shadow:inset 0 3px 0 #2563eb;}
+tr.drop-after td{box-shadow:inset 0 -3px 0 #2563eb;}
 @keyframes rowFlash{0%,40%{background:var(--accent-soft);}100%{background:transparent;}}
 .po-kpis{grid-template-columns:repeat(7,1fr);gap:10px;}
 .po-kpis .kpi{padding:14px 12px 12px;}
@@ -2336,6 +2344,54 @@ function rerenderPo(page, focusKey){
   }, 0);
 }
 
+/* Drag a PO item row by its ⋮⋮ handle; a blue line shows where it will land.
+   Works with mouse and touch; the page scrolls when the pointer nears the top or bottom edge.
+   onMove(from, to) gets the new index in the list after the row is taken out. */
+function startLineDrag(e, handle, page, onMove){
+  if(e.button !== 0) return;
+  e.preventDefault();
+  const tbody = handle.closest('tbody');
+  const rows = [...tbody.querySelectorAll('tr[data-row]')];
+  const from = +handle.dataset.drag;
+  if(rows.length < 2) return;
+  rows[from].classList.add('dragging');
+  document.body.classList.add('po-dragging');
+  let target = null, lastY = e.clientY, scrollTimer = null;
+
+  const mark = y => {
+    rows.forEach(r=>r.classList.remove('drop-before','drop-after'));
+    let i = rows.findIndex(r=>{ const b = r.getBoundingClientRect(); return y < b.top + b.height/2; });
+    const before = i !== -1;
+    if(i === -1) i = rows.length - 1;
+    // Slot = position between rows (0 = above the first). Dropping next to itself changes nothing.
+    const slot = before ? i : rows.length;
+    target = (slot === from || slot === from + 1) ? null : slot;
+    if(target !== null) rows[i].classList.add(before ? 'drop-before' : 'drop-after');
+  };
+  const edgeScroll = () => {
+    const edge = 60, h = window.innerHeight;
+    const dy = lastY < edge ? -(edge - lastY) / 3 : lastY > h - edge ? (lastY - (h - edge)) / 3 : 0;
+    if(dy){ window.scrollBy(0, dy); mark(lastY); }
+  };
+  const onPointerMove = ev => { lastY = ev.clientY; mark(lastY); };
+  const finish = ev => {
+    clearInterval(scrollTimer);
+    document.removeEventListener('pointermove', onPointerMove);
+    document.removeEventListener('pointerup', finish);
+    document.removeEventListener('pointercancel', finish);
+    document.removeEventListener('keydown', onKey);
+    document.body.classList.remove('po-dragging');
+    rows.forEach(r=>r.classList.remove('dragging','drop-before','drop-after'));
+    if(ev && ev.type === 'pointerup' && target !== null) onMove(from, target > from ? target - 1 : target);
+  };
+  const onKey = ev => { if(ev.key === 'Escape'){ target = null; finish(); } };
+  document.addEventListener('pointermove', onPointerMove);
+  document.addEventListener('pointerup', finish);
+  document.addEventListener('pointercancel', finish);
+  document.addEventListener('keydown', onKey);
+  scrollTimer = setInterval(edgeScroll, 16);
+}
+
 function renderPoEditor(page){
   const d = poOpen.draft, c = computePO(d), t = c.totals, cur = d.currency || 'USD';
   const st = PO_STATUS[d.status] || PO_STATUS.draft;
@@ -2416,8 +2472,8 @@ function renderPoEditor(page){
         <thead><tr><th>#</th><th>Product &amp; description</th><th class="num">Qty</th><th class="num">Unit price (${escapeHtml(cur)})</th><th class="num">Amount (${escapeHtml(cur)})</th>
           <th class="num">NW/unit (kg)</th><th class="num">GW/unit (kg)</th><th class="num">Vol/unit (m³)</th><th class="num">Total NW</th><th class="num">Total GW</th><th class="num">Total vol</th><th>HS code</th><th></th></tr></thead>
         <tbody>
-        ${d.lines.map((l,i)=>`<tr>
-          <td class="muted">${i+1}</td>
+        ${d.lines.map((l,i)=>`<tr data-row="${i}">
+          <td class="muted drag-handle" data-drag="${i}" title="Drag up or down to move this item"><span class="grip">⋮⋮</span>${i+1}</td>
           <td><select class="cell" ${lineIn(i,'productId')} style="min-width:360px;">${prodOpts(l)}</select></td>
           <td>${numIn(i,'qty',l)}</td>
           <td>${numIn(i,'price',l)}</td>
@@ -2534,6 +2590,10 @@ function renderPoEditor(page){
     ch[el.dataset.cf] = el.dataset.cf==='amount' ? (el.value==='' ? '' : toNum(el.value)) : el.value;
   })));
   page.querySelectorAll('.po-del-line').forEach(b=>b.addEventListener('click', ()=>edit(()=>{ d.lines.splice(+b.dataset.li, 1); })));
+  page.querySelectorAll('[data-drag]').forEach(h=>h.addEventListener('pointerdown', e=>startLineDrag(e, h, page, (from, to)=>edit(()=>{
+    const [moved] = d.lines.splice(from, 1);
+    d.lines.splice(to, 0, moved);
+  }))));
   page.querySelectorAll('.po-del-charge').forEach(b=>b.addEventListener('click', ()=>edit(()=>{ d.charges.splice(+b.dataset.ci, 1); })));
   page.querySelectorAll('.po-add-line').forEach(b=>b.addEventListener('click', ()=>edit(()=>{ d.lines.push(blankLine()); }, `l${d.lines.length}-productId`)));
   document.getElementById('po-add-charge').addEventListener('click', ()=>edit(()=>{ d.charges = d.charges || []; d.charges.push({label:'', amount:0}); }, `c${(d.charges||[]).length}-label`));
