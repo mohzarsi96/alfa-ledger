@@ -2212,6 +2212,9 @@ function computePO(po){
 
 const PO_STATUS = {draft:{label:'Draft', pill:'pill-pending'}, ordered:{label:'Ordered', pill:'pill-partial'}, received:{label:'Received', pill:'pill-paid'}};
 const fmtFx = n => (toNum(n)<0?'−':'') + Math.abs(toNum(n)).toLocaleString('en-US',{minimumFractionDigits:2, maximumFractionDigits:2});
+// Unit prices (FOB, CIF per unit, last price) can be fractions of a cent: show up to 4 decimals.
+const fmtPrice = n => (toNum(n)<0?'−':'') + Math.abs(toNum(n)).toLocaleString('en-US',{minimumFractionDigits:2, maximumFractionDigits:4});
+const round4 = n => Math.round((n + Number.EPSILON) * 10000) / 10000;
 const fmtQty = (n, d=2) => toNum(n).toLocaleString('en-IN',{maximumFractionDigits:d});
 const vendorById = id => state.vendors.find(v=>v.id===id) || null;
 const productLabel = p => p.spec ? p.name + ' — ' + p.spec : (p.name||'');
@@ -2596,7 +2599,8 @@ function renderPoEditor(page){
         if(isBlank(l.price) && !isBlank(p.lastPrice)) l.price = p.lastPrice;
       }
     }
-    else if(['qty','price','nw','gw','vol'].includes(k)) l[k] = el.value==='' ? '' : toNum(el.value);
+    else if(k==='price') l.price = el.value==='' ? '' : round4(toNum(el.value));   // up to 4 decimals
+    else if(['qty','nw','gw','vol'].includes(k)) l[k] = el.value==='' ? '' : toNum(el.value);
     else l[k] = el.value;
   })));
   page.querySelectorAll('[data-sp]').forEach(el=>el.addEventListener('change', ()=>edit(()=>{
@@ -2745,7 +2749,7 @@ function printSupplierPo(d){
       <thead><tr><th>#</th><th>Item / description</th><th>HS code</th><th class="r">Qty</th><th class="r">Unit price<br>(${e(cur)})</th><th class="r">Amount<br>(${e(cur)}) ${e(d.deliveryTerms||'')}</th>
         <th class="r">NW/unit<br>(kg)</th><th class="r">GW/unit<br>(kg)</th><th class="r">Vol/unit<br>(m³)</th><th class="r">Total NW<br>(kg)</th><th class="r">Total GW<br>(kg)</th><th class="r">Total vol<br>(m³)</th></tr></thead>
       <tbody>${d.lines.map((l,i)=>`<tr><td>${i+1}</td><td><b>${e(l.item||'')}</b>${l.spec?' — '+e(l.spec):''}</td><td>${e(l.hs||'')}</td>
-        <td class="r">${fmtQty(l.qty)}</td><td class="r">${fmtFx(l.price)}</td><td class="r">${fmtFx(c.rows[i].fob)}</td>
+        <td class="r">${fmtQty(l.qty)}</td><td class="r">${fmtPrice(l.price)}</td><td class="r">${fmtFx(c.rows[i].fob)}</td>
         <td class="r">${fmtQty(l.nw)}</td><td class="r">${fmtQty(l.gw)}</td><td class="r">${fmtQty(l.vol,3)}</td>
         <td class="r">${fmtQty(toNum(l.nw)*toNum(l.qty))}</td><td class="r">${fmtQty(toNum(l.gw)*toNum(l.qty))}</td><td class="r">${fmtQty(toNum(l.vol)*toNum(l.qty),3)}</td></tr>`).join('')}
       <tr class="tot"><td colspan="3">TOTAL FOB</td><td class="r">${fmtQty(t.qty)}</td><td></td><td class="r">${e(cur)} ${fmtFx(t.fob)}</td><td></td><td></td><td></td>
@@ -2781,7 +2785,7 @@ function loadExcelJs(){
   return excelJsLoad;
 }
 const XL = {navy:'FF1F5F8B', ink:'FF16202B', band:'FFDFE6EF', zebra:'FFF5F8FB', total:'FFE3EBF4', amber:'FFFDE7B0', line:'FF9AA7B8', white:'FFFFFFFF'};
-const XL_FMT = {usd:'#,##0.00', inr:'"₹"#,##0', inr2:'"₹"#,##0.00', dec:'#,##0.00', vol:'0.000', pct:'0.##"%"', num:'General'};
+const XL_FMT = {usd:'#,##0.00', price:'#,##0.00##',inr:'"₹"#,##0', inr2:'"₹"#,##0.00', dec:'#,##0.00', vol:'0.000', pct:'0.##"%"', num:'General'};
 /* Cell-writing helpers for one worksheet: every written cell gets a thin border. */
 function xlKit(ws){
   const thin = {style:'thin', color:{argb:XL.line}};
@@ -2843,7 +2847,7 @@ async function exportSupplierPo(d){
   r++;
   k.header(r++, ['#','Item','Description / spec','HS code','Qty',`Unit price (${cur})`,`Amount (${cur}) ${d.deliveryTerms||''}`.trim(),
     'NW/unit (kg)','GW/unit (kg)','Vol/unit (m³)','Total NW (kg)','Total GW (kg)','Total vol (m³)']);
-  const fm = [XL_FMT.num, null, null, null, XL_FMT.num, XL_FMT.usd, XL_FMT.usd, XL_FMT.num, XL_FMT.num, XL_FMT.vol, XL_FMT.dec, XL_FMT.dec, XL_FMT.vol];
+  const fm = [XL_FMT.num, null, null, null, XL_FMT.num, XL_FMT.price, XL_FMT.usd, XL_FMT.num, XL_FMT.num, XL_FMT.vol, XL_FMT.dec, XL_FMT.dec, XL_FMT.vol];
   // Amounts and totals are live formulas, so editing a qty or price in Excel recalculates the PO.
   // N() treats a blank cell as 0. `result` is the cached value shown before Excel recalculates.
   const f = (formula, result) => ({formula, result});
@@ -3110,7 +3114,7 @@ async function exportCustomsPo(d){
       k.put(r, 2, 2, r===r0 ? g.item : null, {fill:'FFF3F6FA', font:{bold:true}});
       k.put(r, 3, 3, l.spec||'');
       k.put(r, 4, 4, q, {fmt:XL_FMT.num, align:{horizontal:'center'}});
-      k.put(r, 5, 5, round2(q ? x.cifUsd/q : 0), {fmt:XL_FMT.usd});
+      k.put(r, 5, 5, round4(q ? x.cifUsd/q : 0), {fmt:XL_FMT.price});
       k.put(r, 6, 6, round2(x.cifUsd), {fmt:XL_FMT.usd});
       r++;
     });
@@ -3155,7 +3159,7 @@ function printCustomsPo(d){
   const itemRows = groups.map((g, gi)=>g.rows.map((i, k)=>{
     const l = d.lines[i], x = c.rows[i], q = toNum(l.qty);
     return `<tr>${k===0 ? `<td class="c" rowspan="${g.rows.length}">${gi+1}</td><td class="item" rowspan="${g.rows.length}">${e(g.item)}</td>` : ''}
-      <td>${e(l.spec||'')}</td><td class="c">${fmtQty(q)}</td><td class="r">${fmtFx(q ? x.cifUsd/q : 0)}</td><td class="r">${fmtFx(x.cifUsd)}</td></tr>`;
+      <td>${e(l.spec||'')}</td><td class="c">${fmtQty(q)}</td><td class="r">${fmtPrice(q ? x.cifUsd/q : 0)}</td><td class="r">${fmtFx(x.cifUsd)}</td></tr>`;
   }).join('')).join('');
   const contact = contactParts.map(e).join('&nbsp; | &nbsp;');
   const html = `<!doctype html><html><head><meta charset="utf-8"><title>${e(d.poNumber)} customs</title><style>
@@ -3243,7 +3247,7 @@ async function exportPoCosting(d){
   r++;
   const headRow = r;
   k.header(r++, head, head.map((h,i)=>i>=23 ? XL.amber : null));
-  const fm = [XL_FMT.num, null, null, XL_FMT.num, XL_FMT.usd, XL_FMT.usd, XL_FMT.num, XL_FMT.num, XL_FMT.vol, XL_FMT.dec, XL_FMT.dec, XL_FMT.vol,
+  const fm = [XL_FMT.num, null, null, XL_FMT.num, XL_FMT.price, XL_FMT.usd, XL_FMT.num, XL_FMT.num, XL_FMT.vol, XL_FMT.dec, XL_FMT.dec, XL_FMT.vol,
     XL_FMT.usd, XL_FMT.inr, null, XL_FMT.pct, XL_FMT.inr, XL_FMT.inr, XL_FMT.inr, XL_FMT.inr, XL_FMT.inr, XL_FMT.inr, XL_FMT.inr2, ...c.markups.map(()=>XL_FMT.inr)];
   d.lines.forEach((l,i)=>{
     const x = c.rows[i], q = toNum(l.qty);
@@ -3557,7 +3561,7 @@ const MASTERS = {
       {label:'NW/unit (kg)', num:true, cell:p=>isBlank(p.nw)?'—':fmtQty(p.nw)},
       {label:'GW/unit (kg)', num:true, cell:p=>isBlank(p.gw)?'—':fmtQty(p.gw)},
       {label:'Vol/unit (m³)', num:true, cell:p=>isBlank(p.vol)?'—':fmtQty(p.vol,3)},
-      {label:'Last price (USD)', num:true, cell:p=>isBlank(p.lastPrice)?'—':fmtFx(p.lastPrice)+(p.lastPo?`<div class="hint">${escapeHtml(p.lastPo)}</div>`:'')},
+      {label:'Last price (USD)', num:true, cell:p=>isBlank(p.lastPrice)?'—':fmtPrice(p.lastPrice)+(p.lastPo?`<div class="hint">${escapeHtml(p.lastPo)}</div>`:'')},
     ],
     search:p=>[p.sku, p.name, p.spec, p.hs].join(' ')},
   vendors:{label:'Vendors', one:'vendor', coll:'vendors', sort:v=>v.name,
