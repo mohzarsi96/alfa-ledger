@@ -801,6 +801,56 @@ function monthsInFY(startYear){
   return allMonthTabs().filter(m=>fyStartYear(m)===startYear).sort();
 }
 
+/* One financial year + period filter shared by the report pages (Dashboard, P&L, Channel, Salesman,
+   Monthly, Expenses): picking Q2 FY 25-26 on one page keeps it on the others. */
+const FY_PERIODS = [
+  {id:'year', label:'Full year',    months:[4,5,6,7,8,9,10,11,12,1,2,3]},
+  {id:'Q1',   label:'Q1 (Apr–Jun)', months:[4,5,6]},
+  {id:'Q2',   label:'Q2 (Jul–Sep)', months:[7,8,9]},
+  {id:'Q3',   label:'Q3 (Oct–Dec)', months:[10,11,12]},
+  {id:'Q4',   label:'Q4 (Jan–Mar)', months:[1,2,3]},
+  {id:'H1',   label:'H1 (Apr–Sep)', months:[4,5,6,7,8,9]},
+  {id:'H2',   label:'H2 (Oct–Mar)', months:[10,11,12,1,2,3]},
+];
+let reportFY = null;        // FY start year, or 'all'
+let reportPeriod = 'year';  // an FY_PERIODS id
+function ensureReportFilter(){
+  const fys = availableFYs();
+  if(reportFY===null || (reportFY!=='all' && !fys.includes(reportFY))){
+    reportFY = fys.includes(fyStartYear(currentMonthKey())) ? fyStartYear(currentMonthKey()) : (fys[0] ?? 'all');
+  }
+  if(reportFY==='all' || !FY_PERIODS.some(p=>p.id===reportPeriod)) reportPeriod = 'year';
+}
+function inReportPeriod(monthKey){
+  if(!monthKey || !/^\d{4}-\d{2}$/.test(monthKey)) return reportFY==='all';
+  if(reportFY==='all') return true;
+  if(fyStartYear(monthKey)!==reportFY) return false;
+  return FY_PERIODS.find(p=>p.id===reportPeriod).months.includes(+monthKey.slice(5,7));
+}
+/* Calendar months of the chosen period, in order (only when a year is chosen). */
+function reportMonthKeys(){
+  return reportFY==='all' ? [] : fyMonthKeys(reportFY).filter(inReportPeriod);
+}
+function reportPeriodText(){
+  if(reportFY==='all') return 'all years';
+  const p = FY_PERIODS.find(x=>x.id===reportPeriod);
+  return p.id==='year' ? fyLabel(reportFY) : `${p.id} ${fyLabel(reportFY)} (${p.label.replace(/^.*\(|\)$/g,'')})`;
+}
+function reportFilterHtml(){
+  const fys = availableFYs();
+  return `<select id="rf-fy" title="Financial year" style="width:auto;min-width:120px;">
+      ${fys.map(y=>`<option value="${y}" ${reportFY===y?'selected':''}>${fyLabel(y)}</option>`).join('')}
+      <option value="all" ${reportFY==='all'?'selected':''}>All years</option>
+    </select>
+    <select id="rf-period" title="Period of the financial year" style="width:auto;min-width:130px;" ${reportFY==='all'?'disabled':''}>
+      ${FY_PERIODS.map(p=>`<option value="${p.id}" ${reportPeriod===p.id?'selected':''}>${p.label}</option>`).join('')}
+    </select>`;
+}
+function bindReportFilter(rerender){
+  document.getElementById('rf-fy').addEventListener('change', e=>{ reportFY = e.target.value==='all' ? 'all' : parseInt(e.target.value,10); ensureReportFilter(); rerender(); });
+  document.getElementById('rf-period').addEventListener('change', e=>{ reportPeriod = e.target.value; rerender(); });
+}
+
 /* ============================================================
    NAV
    ============================================================ */
@@ -882,19 +932,15 @@ function businessOf(channelCode){
   const n = String(state.channels[channelCode]||'').trim().toLowerCase();
   return (c==='sr' || n==='sr') ? 'Lifting' : 'Glass';
 }
-let dashboardFY = null;
 function fyMonthKeys(startYear){
   const out=[];
   for(let i=0;i<12;i++){ const m=((3+i)%12)+1; const y=m>=4?startYear:startYear+1; out.push(y+'-'+String(m).padStart(2,'0')); }
   return out;
 }
 function renderDashboard(page){
-  const fys = availableFYs();
-  if(dashboardFY===null || (dashboardFY!=='all' && !fys.includes(dashboardFY))){
-    dashboardFY = fys.includes(fyStartYear(currentMonthKey())) ? fyStartYear(currentMonthKey()) : (fys[0] ?? 'all');
-  }
+  ensureReportFilter();
   const all = computedOrders();
-  const orders = all.filter(o=> o.ledgerMonth && (dashboardFY==='all' || fyStartYear(o.ledgerMonth)===dashboardFY));
+  const orders = all.filter(o=> o.ledgerMonth && inReportPeriod(o.ledgerMonth));
   const totalGross = round2(orders.reduce((s,o)=>s+o.grossSales,0));
   const known = orders.filter(o=>o.netProfit!==null);
   const totalGrossProfit = round2(known.reduce((s,o)=>s+o.grossProfit,0));
@@ -902,17 +948,14 @@ function renderDashboard(page){
   const costPendingCount = orders.filter(o=>o.totalCost===null).length;
   const kGross = known.reduce((t,o)=>t+o.grossSales,0), kCost = known.reduce((t,o)=>t+o.totalCost,0);
   const avgMarkup = kCost>0 ? (kGross/kCost-1)*100 : null;
-  const fyText = dashboardFY==='all' ? 'all years' : fyLabel(dashboardFY);
+  const fyText = reportPeriodText();
   const pieBy = company().bizSplit ? 'business' : 'channel';
   const icon = d => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="${d}"/></svg>`;
 
   page.innerHTML = `
     <div class="pagehead">
       <div><h1>Dashboard</h1><p>Sales and profit for ${escapeHtml(fyText)} — ${orders.length} sale orders.</p></div>
-      <div class="actions"><select id="dash-fy" style="width:auto;min-width:130px;">
-        ${fys.map(y=>`<option value="${y}" ${dashboardFY===y?'selected':''}>${fyLabel(y)}</option>`).join('')}
-        <option value="all" ${dashboardFY==='all'?'selected':''}>All years</option>
-      </select></div>
+      <div class="actions">${reportFilterHtml()}</div>
     </div>
     <div class="kpi-row" style="grid-template-columns:repeat(4,1fr);">
       <div class="kpi"><div class="icon-chip">${icon('M12 1v22M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6')}</div><div class="label">Gross sales</div><div class="value num">${fmtMoney(totalGross)}</div><div class="sub">${orders.length} orders · incl. GST</div></div>
@@ -932,10 +975,10 @@ function renderDashboard(page){
       <div class="panel"><h3 class="share-title">Profit by ${pieBy}</h3><div class="panel-chart tall"><canvas id="chBizProfit"></canvas></div></div>
     </div>
   `;
-  document.getElementById('dash-fy').addEventListener('change', e=>{ dashboardFY = e.target.value==='all' ? 'all' : parseInt(e.target.value,10); renderDashboard(page); });
+  bindReportFilter(()=>renderDashboard(page));
 
-  // month axis: 12 months of the FY, or every month with data for "all years"
-  const months = dashboardFY==='all' ? [...new Set(orders.map(o=>o.ledgerMonth))].sort() : fyMonthKeys(dashboardFY);
+  // month axis: the months of the chosen period, or every month with data for "all years"
+  const months = reportFY==='all' ? [...new Set(orders.map(o=>o.ledgerMonth))].sort() : reportMonthKeys();
   const mLabel = m => MONTH_NAMES[parseInt(m.split('-')[1],10)-1].slice(0,3)+' '+m.slice(2,4);
   const labels = months.map(mLabel);
   const sumBy = (list, fn) => months.map(m=>round2(list.filter(o=>o.ledgerMonth===m).reduce((t,o)=>t+fn(o),0)));
@@ -1607,11 +1650,13 @@ function openOrderModal(id){
    P&L
    ============================================================ */
 function renderPnl(page){
-  const tabs = allMonthTabs();
-  if(orderFilters.month !== 'all' && !tabs.includes(orderFilters.month)) orderFilters.month = 'all';
-  const all = computedOrders();
+  ensureReportFilter();
+  const tabs = allMonthTabs().filter(inReportPeriod);
+  // the month tab is shared with Sale Orders; here it only narrows within the chosen period
+  const pnlMonth = tabs.includes(orderFilters.month) ? orderFilters.month : 'all';
+  const all = computedOrders().filter(o=>inReportPeriod(o.ledgerMonth));
   let rows = all.filter(o=>{
-    if(orderFilters.month !== 'all' && o.ledgerMonth !== orderFilters.month) return false;
+    if(pnlMonth !== 'all' && o.ledgerMonth !== pnlMonth) return false;
     if(orderFilters.channel && o.channel!==orderFilters.channel) return false;
     if(orderFilters.rep && o.rep!==orderFilters.rep) return false;
     if(orderFilters.q){
@@ -1631,11 +1676,12 @@ function renderPnl(page){
 
   page.innerHTML = `
     <div class="pagehead">
-      <div><h1>P&amp;L</h1><p>Gross and net profit per order, organized by month.</p></div>
+      <div><h1>P&amp;L</h1><p>Gross and net profit per order for ${escapeHtml(reportPeriodText())}, organized by month.</p></div>
+      <div class="actions">${reportFilterHtml()}</div>
     </div>
     <div class="month-tabs" id="month-tabs">
-      <div class="month-tab ${orderFilters.month==='all'?'active':''}" data-month="all">All orders</div>
-      ${tabs.map(m=>`<div class="month-tab ${orderFilters.month===m?'active':''}" data-month="${m}">${escapeHtml(monthLabel(m))}</div>`).join('')}
+      <div class="month-tab ${pnlMonth==='all'?'active':''}" data-month="all">All months</div>
+      ${tabs.map(m=>`<div class="month-tab ${pnlMonth===m?'active':''}" data-month="${m}">${escapeHtml(monthLabel(m))}</div>`).join('')}
     </div>
     <div class="toolbar">
       <input type="search" id="f-q" placeholder="Search order ref…" value="${escapeHtml(orderFilters.q)}">
@@ -1668,7 +1714,7 @@ function renderPnl(page){
             <td class="num">${o.totalCost===null?'<span class="muted">pending</span>':fmtMoney(o.totalCost)}</td>
             <td class="num">${o.grossProfit===null?'—':fmtMoney(o.grossProfit)}</td>
             <td class="num">${o.netProfit===null?'—':fmtMoney(o.netProfit)}</td>
-          </tr>`).join('') || `<tr><td colspan="8" class="empty">No orders in ${orderFilters.month==='all'?'the ledger':'this month'} yet — add them from the Sale Orders tab first.</td></tr>`}
+          </tr>`).join('') || `<tr><td colspan="8" class="empty">No orders in ${pnlMonth==='all'?escapeHtml(reportPeriodText()):'this month'}.</td></tr>`}
         </tbody>
         ${rows.length ? `<tfoot><tr class="tot-row">
           <td colspan="3">Total · ${rows.length} order${rows.length!==1?'s':''}</td>
@@ -1688,21 +1734,21 @@ function renderPnl(page){
   page.querySelectorAll('.month-tab').forEach(t=>{
     t.addEventListener('click', ()=>{ orderFilters.month = t.dataset.month; renderPnl(page); });
   });
+  bindReportFilter(()=>renderPnl(page));
 }
 
 /* ============================================================
    CHANNEL SUMMARY
    ============================================================ */
-let channelFY = 'all';
 let channelMonth = 'all';
 function renderChannels(page){
-  const fys = availableFYs();
-  const monthsForFY = channelFY==='all' ? allMonthTabs() : monthsInFY(parseInt(channelFY,10));
+  ensureReportFilter();
+  const monthsForFY = allMonthTabs().filter(inReportPeriod);
   if(channelMonth!=='all' && !monthsForFY.includes(channelMonth)) channelMonth = 'all';
 
   const orders = computedOrders().filter(o=>{
     if(!o.ledgerMonth) return false;
-    if(channelFY!=='all' && fyStartYear(o.ledgerMonth)!==parseInt(channelFY,10)) return false;
+    if(!inReportPeriod(o.ledgerMonth)) return false;
     if(channelMonth!=='all' && o.ledgerMonth!==channelMonth) return false;
     return true;
   });
@@ -1723,7 +1769,7 @@ function renderChannels(page){
   page.innerHTML = `
     <div class="pagehead"><div><h1>Channel Summary</h1><p>Sales and profitability rolled up by sales channel.</p></div></div>
     <div class="toolbar">
-      <select id="f-fy"><option value="all">All years</option>${fys.map(y=>`<option value="${y}" ${channelFY==String(y)?'selected':''}>${fyLabel(y)}</option>`).join('')}</select>
+      ${reportFilterHtml()}
       <select id="f-month"><option value="all">All months</option>${monthsForFY.map(m=>`<option value="${m}" ${channelMonth===m?'selected':''}>${escapeHtml(monthLabel(m))}</option>`).join('')}</select>
       <div class="spacer"></div>
       <span class="muted" style="font-size:12px;">${orders.length} orders in view</span>
@@ -1748,7 +1794,7 @@ function renderChannels(page){
       </table>
     </div>
   `;
-  document.getElementById('f-fy').addEventListener('change', e=>{ channelFY=e.target.value; channelMonth='all'; renderChannels(page); });
+  bindReportFilter(()=>{ channelMonth='all'; renderChannels(page); });
   document.getElementById('f-month').addEventListener('change', e=>{ channelMonth=e.target.value; renderChannels(page); });
   charts.channelShare = shareChart('chChannelShare', rows.map(r=>chName(r.channel)), rows.map(r=>r.gross), false);
   charts.channelProfit = shareChart('chChannelProfit', rows.map(r=>chName(r.channel)), rows.map(r=>r.net), true);
@@ -1757,16 +1803,15 @@ function renderChannels(page){
 /* ============================================================
    SALESMAN SUMMARY
    ============================================================ */
-let salesmenFY = 'all';
 let salesmenMonth = 'all';
 function renderSalesmen(page){
-  const fys = availableFYs();
-  const monthsForFY = salesmenFY==='all' ? allMonthTabs() : monthsInFY(parseInt(salesmenFY,10));
+  ensureReportFilter();
+  const monthsForFY = allMonthTabs().filter(inReportPeriod);
   if(salesmenMonth!=='all' && !monthsForFY.includes(salesmenMonth)) salesmenMonth = 'all';
 
   const orders = computedOrders().filter(o=>{
     if(!o.ledgerMonth) return false;
-    if(salesmenFY!=='all' && fyStartYear(o.ledgerMonth)!==parseInt(salesmenFY,10)) return false;
+    if(!inReportPeriod(o.ledgerMonth)) return false;
     if(salesmenMonth!=='all' && o.ledgerMonth!==salesmenMonth) return false;
     return true;
   });
@@ -1787,7 +1832,7 @@ function renderSalesmen(page){
   page.innerHTML = `
     <div class="pagehead"><div><h1>Salesman Summary</h1><p>Sales and profit contribution by sales executive.</p></div></div>
     <div class="toolbar">
-      <select id="f-fy"><option value="all">All years</option>${fys.map(y=>`<option value="${y}" ${salesmenFY==String(y)?'selected':''}>${fyLabel(y)}</option>`).join('')}</select>
+      ${reportFilterHtml()}
       <select id="f-month"><option value="all">All months</option>${monthsForFY.map(m=>`<option value="${m}" ${salesmenMonth===m?'selected':''}>${escapeHtml(monthLabel(m))}</option>`).join('')}</select>
       <div class="spacer"></div>
       <span class="muted" style="font-size:12px;">${orders.length} orders in view</span>
@@ -1811,7 +1856,7 @@ function renderSalesmen(page){
       </table>
     </div>
   `;
-  document.getElementById('f-fy').addEventListener('change', e=>{ salesmenFY=e.target.value; salesmenMonth='all'; renderSalesmen(page); });
+  bindReportFilter(()=>{ salesmenMonth='all'; renderSalesmen(page); });
   document.getElementById('f-month').addEventListener('change', e=>{ salesmenMonth=e.target.value; renderSalesmen(page); });
   charts.repBar = shareChart('chRepBar', rows.map(r=>repName(r.rep)), rows.map(r=>r.gross), false);
   charts.repProfit = shareChart('chRepProfit', rows.map(r=>repName(r.rep)), rows.map(r=>r.net), true);
@@ -4035,20 +4080,17 @@ const EXPENSE_FIELDS = [
   {key:'marketing', label:'IndiaMart & marketing'},
   {key:'other', label:'Other miscellaneous expenses'},
 ];
-let expensesFY = 'all';
 let expDraft = null;
 function renderExpenses(page){
-  const fys = availableFYs();
-  if(expensesFY!=='all' && !fys.includes(expensesFY)) expensesFY = 'all';
+  ensureReportFilter();
   const saved = state.expenses || {};
   const val = k => ((expDraft||{})[k]!==undefined ? expDraft[k] : (saved[k]||0));
   const monthlyTotal = () => EXPENSE_FIELDS.reduce((t,f)=>t+(parseFloat(val(f.key))||0),0);
 
-  const orders = computedOrders().filter(o=> o.ledgerMonth && o.netProfit!==null && (expensesFY==='all' || fyStartYear(o.ledgerMonth)===expensesFY));
   const byMonth = {};
   computedOrders().forEach(o=>{
     if(!o.ledgerMonth) return;
-    if(expensesFY!=='all' && fyStartYear(o.ledgerMonth)!==expensesFY) return;
+    if(!inReportPeriod(o.ledgerMonth)) return;
     byMonth[o.ledgerMonth] = byMonth[o.ledgerMonth] || 0;
     if(o.netProfit!==null) byMonth[o.ledgerMonth] += o.netProfit;
   });
@@ -4058,10 +4100,7 @@ function renderExpenses(page){
   page.innerHTML = `
     <div class="pagehead">
       <div><h1>Expenses &amp; True NP</h1><p>Enter your monthly expenses. True net profit = net profit minus monthly expenses × the number of months with data.</p></div>
-      <div class="actions"><select id="exp-fy" style="width:auto;min-width:130px;">
-        <option value="all" ${expensesFY==='all'?'selected':''}>All years</option>
-        ${fys.map(y=>`<option value="${y}" ${expensesFY===y?'selected':''}>${fyLabel(y)}</option>`).join('')}
-      </select></div>
+      <div class="actions">${reportFilterHtml()}</div>
     </div>
     <div class="chart-row" style="align-items:flex-start;">
       <div class="panel">
@@ -4135,7 +4174,7 @@ function renderExpenses(page){
     await saveExpenses(out);
     showToast('Expenses saved');
   });
-  document.getElementById('exp-fy').addEventListener('change', e=>{ expensesFY = e.target.value==='all' ? 'all' : parseInt(e.target.value,10); renderExpenses(page); });
+  bindReportFilter(()=>renderExpenses(page));
 }
 
 /* ============================================================
@@ -4148,10 +4187,12 @@ function monthLabel(key){
   return MONTH_NAMES[parseInt(m,10)-1] + ' ' + y;
 }
 function renderMonthly(page){
+  ensureReportFilter();
   const orders = computedOrders();
   const groups = {};
   orders.forEach(o=>{
     const key = o.ledgerMonth || (o.date ? o.date.slice(0,7) : 'undated');
+    if(!inReportPeriod(key)) return;
     if(!groups[key]) groups[key] = {key, count:0, gross:0, net:0, netKnown:0, pending:0, incentive:0, paid:0};
     const g = groups[key];
     g.count++;
@@ -4164,7 +4205,8 @@ function renderMonthly(page){
   const rows = Object.values(groups).sort((a,b)=> b.key.localeCompare(a.key));
 
   page.innerHTML = `
-    <div class="pagehead"><div><h1>Monthly Summary</h1><p>Sale orders grouped by ledger month — sales, profit and incentive trend over time.</p></div></div>
+    <div class="pagehead"><div><h1>Monthly Summary</h1><p>Sale orders grouped by ledger month for ${escapeHtml(reportPeriodText())}.</p></div>
+      <div class="actions">${reportFilterHtml()}</div></div>
     <div class="chart-row" style="grid-template-columns:1fr;">
       <div class="panel"><h3>Gross sales &amp; net profit by month</h3><div class="panel-chart"><canvas id="chMonthly"></canvas></div></div>
     </div>
@@ -4180,11 +4222,12 @@ function renderMonthly(page){
             <td class="num">${r.count}</td>
             <td class="num">${fmtMoney(r.gross)}</td>
             <td class="num">${r.netKnown? fmtMoney(round2(r.net)) : '—'}</td>
-          </tr>`).join('') || '<tr><td colspan="4" class="empty">No orders yet.</td></tr>'}
+          </tr>`).join('') || '<tr><td colspan="4" class="empty">No orders in this period.</td></tr>'}
         </tbody>
       </table>
     </div>
   `;
+  bindReportFilter(()=>renderMonthly(page));
 
   const chronological = [...rows].sort((a,b)=> a.key.localeCompare(b.key));
   charts.monthly = new Chart(document.getElementById('chMonthly'), {
