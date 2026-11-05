@@ -2319,6 +2319,9 @@ function closePo(){
   if(poOpen && poOpen.dirty) showConfirm('Leave without saving?', 'Your changes to this PO will be lost.', leave, 'Discard changes');
   else leave();
 }
+// Dates on a PO (PO date, invoice date, Bill of Entry date) can't be before 2023.
+const PO_DATE_MIN = '2023-01-01', PO_DATE_MAX = '2099-12-31';
+const poDateOk = v => /^\d{4}-\d{2}-\d{2}$/.test(v||'') && v >= PO_DATE_MIN && v <= PO_DATE_MAX;
 const blankLine = () => ({productId:'', item:'', spec:'', qty:'', price:'', nw:'', gw:'', vol:'', hs:'', sp:[]});
 
 /* Re-render after an edit, keeping the scroll positions and the field the user moved to.
@@ -2405,7 +2408,7 @@ function renderPoEditor(page){
   const hsOpts = sel => `<option value="">—</option>`
     + state.hscodes.map(h=>h.id).sort().map(code=>`<option ${sel===code?'selected':''}>${escapeHtml(code)}</option>`).join('')
     + (sel && !hsByCode(sel) ? `<option selected>${escapeHtml(sel)}</option>` : '');
-  const field = (k, label, type, cls) => `<div class="field ${cls||''}"><label>${label}</label><input data-fk="h-${k}" data-h="${k}" type="${type||'text'}" ${type==='number'?'step="any"':''} value="${escapeAttr(d[k]??'')}"></div>`;
+  const field = (k, label, type, cls) => `<div class="field ${cls||''}"><label>${label}</label><input data-fk="h-${k}" ${type==='date' ? 'data-hd' : 'data-h'}="${k}" type="${type||'text'}" ${type==='number'?'step="any"':''} ${type==='date'?`min="${PO_DATE_MIN}" max="${PO_DATE_MAX}"`:''} value="${escapeAttr(d[k]??'')}"></div>`;
   const lineIn = (i, k, extra) => `data-fk="l${i}-${k}" data-li="${i}" data-lf="${k}" ${extra||''}`;
   const numIn = (i, k, l) => `<input class="cell n" type="number" step="any" ${lineIn(i,k)} value="${escapeAttr(l[k]??'')}">`;
   const noRate = [...new Set(d.lines.filter((l,i)=>c.rows[i].noRate).map(l=>l.hs || 'no HS code'))];
@@ -2555,6 +2558,23 @@ function renderPoEditor(page){
     </div>`;
 
   const edit = (fn, focusKey) => { fn(); poOpen.dirty = true; rerenderPo(page, focusKey); };
+  // Date boxes: the browser reports each keystroke as a date (typing the year "2026" passes through
+  // 0002, 0020, 0202), so redrawing on every change kept resetting the box. Keep a date only once it is
+  // a whole date from PO_DATE_MIN on, and redraw when the user leaves the box.
+  page.querySelectorAll('[data-hd]').forEach(el=>{
+    const k = el.dataset.hd;
+    let before = d[k] || '';
+    el.addEventListener('focus', ()=>{ before = d[k] || ''; });
+    el.addEventListener('input', ()=>{ if(el.value==='' || poDateOk(el.value)) d[k] = el.value; });
+    el.addEventListener('blur', ()=>{
+      if(el.value && !poDateOk(el.value)){
+        el.value = d[k] || '';
+        showToast(`Enter a date from ${PO_DATE_MIN.slice(0,4)} onwards`);
+      }
+      else d[k] = el.value;
+      if((d[k] || '') !== before){ poOpen.dirty = true; rerenderPo(page); }
+    });
+  });
   page.querySelectorAll('[data-h]').forEach(el=>el.addEventListener('change', ()=>edit(()=>{
     const k = el.dataset.h;
     if(el.type==='checkbox') d[k] = el.checked;
@@ -2625,6 +2645,8 @@ async function savePo(page){
   const d = poOpen.draft;
   d.poNumber = String(d.poNumber||'').trim();
   if(!d.poNumber){ showToast('Enter a PO number'); return; }
+  const badDate = [['date','PO date'],['piDate','Invoice date'],['beDate','Bill of Entry date']].find(([k])=>d[k] && !poDateOk(d[k]));
+  if(badDate){ showToast(`${badDate[1]}: enter a date from ${PO_DATE_MIN.slice(0,4)} onwards`); return; }
   if(state.pos.some(p=>p.id!==poOpen.id && p.poNumber===d.poNumber)){ showToast(d.poNumber+' is already used by another PO'); return; }
   const v = vendorById(d.vendorId);
   const body = {...d, updatedAt:new Date().toISOString(), rates:ratesFor(d)};
@@ -2911,7 +2933,7 @@ function openBeNumberModal(id){
       <h2 style="font-size:17px;">Bill of Entry for ${escapeHtml(po.poNumber)}</h2>
       <form id="be-form">
         <div class="field"><label>Bill of Entry no.</label><input name="be" required autocomplete="off" value="${escapeAttr(po.beNumber||'')}"></div>
-        <div class="field"><label>Bill of Entry date</label><input name="beDate" type="date" value="${escapeAttr(po.beDate||'')}"></div>
+        <div class="field"><label>Bill of Entry date</label><input name="beDate" type="date" min="${PO_DATE_MIN}" max="${PO_DATE_MAX}" value="${escapeAttr(po.beDate||'')}"></div>
         <div class="field"><label>Interest amount (₹, optional)</label><input name="interest" type="number" step="any" min="0" value="${escapeAttr(po.beInterest??'')}"></div>
         <div class="hint" style="margin:-8px 0 8px;">Interest is added to the PO's Other charges, so it is included in landed cost.</div>
         <p id="be-error" style="color:var(--negative);font-size:13px;margin:0;min-height:18px;"></p>
@@ -2932,6 +2954,7 @@ function openBeNumberModal(id){
     const beInterest = form.elements.interest.value==='' ? '' : toNum(form.elements.interest.value);
     const beDate = form.elements.beDate.value;
     if(!beNumber) return;
+    if(beDate && !poDateOk(beDate)){ overlay.querySelector('#be-error').textContent = `Enter a date from ${PO_DATE_MIN.slice(0,4)} onwards.`; return; }
     try{
       await fb.updateDoc(docRef('purchaseOrders/'+id), {beNumber, beDate, beInterest, charges:withBeInterest(po.charges, beInterest), updatedAt:new Date().toISOString()});
       // an open, unsaved copy of this PO keeps them too
