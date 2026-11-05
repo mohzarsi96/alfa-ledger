@@ -1111,12 +1111,22 @@ function sortToggleBtn(){
 let orderFilters = {q:'', channel:'', rep:'', status:'', month:'all'};
 
 const orderSelected = new Set();
+/* Sale Orders has a financial year filter of its own (no quarters): its month tabs and orders are that year's. */
+let ordersFY = null;   // FY start year, or 'all'
 function renderOrders(page){
-  const tabs = allMonthTabs();
-  if(orderFilters.month !== 'all' && !tabs.includes(orderFilters.month)) orderFilters.month = 'all';
-  const all = computedOrders();
+  const fys = availableFYs();
+  if(ordersFY===null || (ordersFY!=='all' && !fys.includes(ordersFY))){
+    ordersFY = fys.includes(fyStartYear(currentMonthKey())) ? fyStartYear(currentMonthKey()) : (fys[0] ?? 'all');
+  }
+  const inFY = m => ordersFY==='all' || (!!m && fyStartYear(m)===ordersFY);
+  const allTabs = allMonthTabs();
+  if(orderFilters.month !== 'all' && !allTabs.includes(orderFilters.month)) orderFilters.month = 'all';
+  const tabs = allTabs.filter(inFY);
+  // the month tab is shared with P&L; a month from another year just shows the whole year here
+  const ordMonth = tabs.includes(orderFilters.month) ? orderFilters.month : 'all';
+  const all = computedOrders().filter(o=>inFY(o.ledgerMonth));
   let rows = all.filter(o=>{
-    if(orderFilters.month !== 'all' && o.ledgerMonth !== orderFilters.month) return false;
+    if(ordMonth !== 'all' && o.ledgerMonth !== ordMonth) return false;
     if(orderFilters.channel && o.channel!==orderFilters.channel) return false;
     if(orderFilters.rep && o.rep!==orderFilters.rep) return false;
     if(orderFilters.status && o.status!==orderFilters.status) return false;
@@ -1135,6 +1145,10 @@ function renderOrders(page){
     <div class="pagehead">
       <div><h1>Sale Orders</h1><p>Core order entry, organized by month. Profit lives in the P&amp;L tab.</p></div>
       <div class="actions">
+        <select id="ord-fy" title="Financial year" style="width:auto;min-width:120px;">
+          ${fys.map(y=>`<option value="${y}" ${ordersFY===y?'selected':''}>${fyLabel(y)}</option>`).join('')}
+          <option value="all" ${ordersFY==='all'?'selected':''}>All years</option>
+        </select>
         <button class="btn" id="btn-template">Download template</button>
         <button class="btn" id="btn-bulk">Bulk upload</button>
         <input type="file" id="bulk-file-input" accept=".xlsx,.xls,.csv" style="display:none;">
@@ -1142,8 +1156,8 @@ function renderOrders(page){
       </div>
     </div>
     <div class="month-tabs" id="month-tabs">
-      <div class="month-tab ${orderFilters.month==='all'?'active':''}" data-month="all">All orders</div>
-      ${tabs.map(m=>`<div class="month-tab ${orderFilters.month===m?'active':''}" data-month="${m}">${escapeHtml(monthLabel(m))}</div>`).join('')}
+      <div class="month-tab ${ordMonth==='all'?'active':''}" data-month="all">${ordersFY==='all' ? 'All orders' : 'All of ' + fyLabel(ordersFY)}</div>
+      ${tabs.map(m=>`<div class="month-tab ${ordMonth===m?'active':''}" data-month="${m}">${escapeHtml(monthLabel(m))}</div>`).join('')}
       <div class="month-tab-add" id="btn-add-month" title="Add a new month">+</div>
     </div>
     <div class="toolbar">
@@ -1151,7 +1165,7 @@ function renderOrders(page){
       <select id="f-channel"><option value="">All channels</option>${channelOpts}</select>
       <select id="f-rep"><option value="">All salesmen</option>${repOpts}</select>
       ${sortToggleBtn()}
-      ${orderFilters.month!=='all' ? `<button class="btn btn-sm btn-danger" id="btn-remove-month">Remove ${escapeHtml(monthLabel(orderFilters.month))}</button>` : ''}
+      ${ordMonth!=='all' ? `<button class="btn btn-sm btn-danger" id="btn-remove-month">Remove ${escapeHtml(monthLabel(ordMonth))}</button>` : ''}
       <div class="spacer"></div>
       <span class="muted" style="font-size:12px;">${rows.length} of ${all.length} orders</span>
     </div>
@@ -1178,7 +1192,7 @@ function renderOrders(page){
             <td class="num">${o.totalCost===null?'<span class="muted">pending</span>':fmtMoney(o.totalCost)}</td>
             <td class="num">${(o.totalCost===null||!o.totalCost)?'<span class="muted">—</span>':(((o.grossSales-o.totalCost)/o.totalCost*100).toFixed(1)+'%')}</td>
             <td><button class="icon-btn btn-del" data-id="${o.id}" title="Delete">✕</button></td>
-          </tr>`).join('') || `<tr><td colspan="9" class="empty">No orders in ${orderFilters.month==='all'?'the ledger':'this month'} yet. Use "+ New order" to add one.</td></tr>`}
+          </tr>`).join('') || `<tr><td colspan="9" class="empty">No orders in ${ordMonth!=='all'?'this month':ordersFY==='all'?'the ledger':fyLabel(ordersFY)} yet. Use "+ New order" to add one.</td></tr>`}
         </tbody>
       </table>
     </div>
@@ -1192,6 +1206,7 @@ function renderOrders(page){
   document.getElementById('f-channel').addEventListener('change', e=>{ orderFilters.channel=e.target.value; renderOrders(page); });
   document.getElementById('f-rep').addEventListener('change', e=>{ orderFilters.rep=e.target.value; renderOrders(page); });
   document.getElementById('btn-sort-order').addEventListener('click', ()=>{ orderSortDir = orderSortDir==='asc'?'desc':'asc'; renderOrders(page); });
+  document.getElementById('ord-fy').addEventListener('change', e=>{ ordersFY = e.target.value==='all' ? 'all' : parseInt(e.target.value,10); orderFilters.month = 'all'; renderOrders(page); });
   page.querySelectorAll('.month-tab').forEach(t=>{
     t.addEventListener('click', ()=>{ orderFilters.month = t.dataset.month; renderOrders(page); });
   });
@@ -1199,7 +1214,7 @@ function renderOrders(page){
   const removeBtn = document.getElementById('btn-remove-month');
   if(removeBtn){
     removeBtn.addEventListener('click', ()=>{
-      const month = orderFilters.month;
+      const month = ordMonth;
       const count = state.orders.filter(o=>o.ledgerMonth===month).length;
       const body = count
         ? `This also permanently deletes the ${count} order${count!==1?'s':''} filed under it. This cannot be undone.`
@@ -1295,6 +1310,7 @@ function openAddMonthModal(){
     if(!v) return;
     await addMonthTab(v);
     orderFilters.month = v;
+    if(ordersFY!=='all') ordersFY = fyStartYear(v);   // show the new month's year on Sale Orders
     overlay.remove();
     render();
     showToast('Month added');
