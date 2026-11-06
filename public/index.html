@@ -3137,6 +3137,15 @@ async function exportEwayBill(po){
 }
 
 /* PO for customs as a workbook, laid out like the printout (portrait A4, page numbers in the footer). */
+/* The vendor's stamp / signature image (vendor master), printed under "Accepted by Supplier" on the PO for customs. */
+const vendorStamp = d => (vendorById(d.vendorId) || {}).stamp || poVendor(d).stamp || '';
+async function xlStamp(wb, ws, src, col, row){
+  const m = String(src||'').match(/^data:image\/(png|jpe?g)/);
+  if(!m) return;
+  const [w0, h0] = await new Promise(ok=>{ const im = new Image(); im.onload = ()=>ok([im.naturalWidth, im.naturalHeight]); im.onerror = ()=>ok([2, 1]); im.src = src; });
+  const h = 88, w = Math.min(220, w0 * h / h0);
+  ws.addImage(wb.addImage({base64:src, extension:m[1]==='png' ? 'png' : 'jpeg'}), {tl:{col, row}, ext:{width:w, height:h}});
+}
 async function exportCustomsPo(d){
   let ExcelJS;
   try{ ExcelJS = await loadExcelJs(); }catch(ex){ showToast(ex.message); return; }
@@ -3206,6 +3215,7 @@ async function exportCustomsPo(d){
       ws.addImage(wb.addImage({base64:s.stamp, extension:m[1]==='png' ? 'png' : 'jpeg'}), {tl:{col:0.3, row:stampRow - 1 + 0.2}, ext:{width:w, height:h}});
     }
   }
+  await xlStamp(wb, ws, vendorStamp(d), 4.6, stampRow - 1 + 0.2);   // the supplier's stamp (vendor master)
   plain(r, 1, 3, 'Authorised Signatory');
   plain(r, 5, 6, 'Signature & Stamp', null, {horizontal:'right'});
   [1, 2, 3, 5, 6].forEach(col=>{ ws.getCell(r, col).border = {top:{style:'thin', color:{argb:XL.ink}}}; });
@@ -3269,7 +3279,7 @@ function printCustomsPo(d){
     ${terms.length ? `<div class="sec">TERMS &amp; CONDITIONS</div><table class="terms">${terms.map(([k,val])=>`<tr><td>${e(k)}</td><td>${br(val)}</td></tr>`).join('')}</table>` : ''}
     <div class="sign">
       <div><div class="who">For ${e(buyerName.toUpperCase())}</div><div class="box">${s.stamp ? `<img src="${s.stamp}" alt="">` : ''}</div><div class="line">Authorised Signatory</div></div>
-      <div class="right"><div class="who">Accepted by Supplier</div><div class="box"></div><div class="line">Signature &amp; Stamp</div></div>
+      <div class="right"><div class="who">Accepted by Supplier</div><div class="box">${vendorStamp(d) ? `<img src="${e(vendorStamp(d))}" alt="">` : ''}</div><div class="line">Signature &amp; Stamp</div></div>
     </div>
   </div>
   <script>window.onload = () => window.print();<\/script>
@@ -3639,6 +3649,7 @@ const MASTERS = {
       {k:'accountNo', label:'Bank account no. (beneficiary)'},
       {k:'swift', label:'SWIFT / BIC'},
       {k:'bank', label:'Bank name and address', type:'textarea', full:true},
+      {k:'stamp', label:'Vendor stamp / signature (printed under "Accepted by Supplier" on the PO for customs)', type:'image', full:true},
     ],
     cols:[
       {label:'Vendor', cls:'ref', cell:v=>`${escapeHtml(v.name)}${v.contact?`<div class="sub">${escapeHtml(v.contact)}</div>`:''}`},
@@ -3754,6 +3765,13 @@ function openMasterModal(kind, id){
   const input = f => {
     const v = val(f), name = `name="${f.k}" ${f.req?'required':''}`;
     if(f.type==='textarea') return `<textarea ${name} rows="3">${escapeHtml(v??'')}</textarea>`;
+    if(f.type==='image') return `<input type="hidden" ${name} value="${escapeAttr(v??'')}">
+      <div class="stamp-preview" data-img-preview="${f.k}"></div>
+      <div style="display:flex;gap:8px;margin-top:6px;">
+        <button type="button" class="btn btn-sm" data-img-pick="${f.k}"></button>
+        <button type="button" class="btn btn-sm btn-danger" data-img-clear="${f.k}">Remove</button>
+        <input type="file" data-img-file="${f.k}" accept="image/png,image/jpeg,image/webp" hidden>
+      </div>`;
     if(f.type==='hs') return `<select ${name}><option value="">—</option>${state.hscodes.slice().sort(byText(h=>h.id)).map(h=>`<option value="${escapeAttr(h.id)}" ${v===h.id?'selected':''}>${escapeHtml(h.id)}${h.description?' · '+escapeHtml(h.description):''}</option>`).join('')}</select>`;
     return `<input ${name} ${f.type==='num'?'type="number" step="any"':''} value="${escapeAttr(v??'')}" ${f.k===def.idField && r ? 'disabled' : ''}>`;
   };
@@ -3776,6 +3794,26 @@ function openMasterModal(kind, id){
   const form = overlay.querySelector('#m-form');
   overlay.addEventListener('click', e=>{ if(e.target===overlay) overlay.remove(); });
   overlay.querySelector('#m-cancel').addEventListener('click', ()=>overlay.remove());
+  // image fields (vendor stamp): shrunk and kept as a data URL in a hidden input
+  def.fields.filter(f=>f.type==='image').forEach(f=>{
+    const q = a => overlay.querySelector(`[${a}="${f.k}"]`), hidden = form.elements[f.k], file = q('data-img-file');
+    const show = () => {
+      const src = hidden.value;
+      q('data-img-preview').innerHTML = src ? `<img src="${escapeAttr(src)}" alt="">` : '<span class="muted">No image uploaded</span>';
+      q('data-img-pick').textContent = src ? 'Replace image' : 'Upload image';
+      q('data-img-clear').hidden = !src;
+    };
+    q('data-img-pick').addEventListener('click', ()=>file.click());
+    q('data-img-clear').addEventListener('click', ()=>{ hidden.value = ''; show(); });
+    file.addEventListener('change', async ()=>{
+      const x = file.files[0];
+      file.value = '';
+      if(!x) return;
+      try{ hidden.value = await shrinkImage(x, 480); show(); }
+      catch(ex){ console.error(ex); showToast('Could not read that image'); }
+    });
+    show();
+  });
   form.addEventListener('submit', async e=>{
     e.preventDefault();
     const err = overlay.querySelector('#m-error');
