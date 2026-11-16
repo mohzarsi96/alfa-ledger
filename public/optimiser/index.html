@@ -1,0 +1,696 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Glass Optimiser</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="engine.js"></script>
+<script>
+// inside a ledger app (a tab, in a frame): the app shows the title, and the theme follows the device like the app does
+if (/[?&]embed/.test(location.search) || window.self !== window.top) document.documentElement.classList.add('embed');
+</script>
+<style>
+:root{
+  --bg:#F4F6F8; --surface:#FFFFFF; --surface-sunk:#EBEFF3; --ink:#14202E; --ink-soft:#526173; --ink-faint:#8794A4;
+  --border:#D8DFE7; --border-soft:#E6EBF0; --accent:#1F5F8B; --accent-2:#2B7BAE; --accent-ink:#123B5A; --accent-soft:#DCEAF4;
+  --cta:#F59E0B; --cta-ink:#2A1A00; --positive:#1E8A5A; --positive-soft:#DDF1E6; --negative:#D2453D; --negative-soft:#FBE4E1;
+  --warn:#9A6208; --warn-soft:#FDF1D6; --paper:#FFFFFF; --sheet:#F7F9FB; --trim:#E3E8EE; --offcut:#E9EDF1; --cutline:#B4232A;
+  --radius:12px; --radius-sm:8px;
+  --shadow-sm:0 1px 2px rgba(16,32,50,0.06), 0 1px 1px rgba(16,32,50,0.04);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0E1721; --surface:#15212E; --surface-sunk:#0B121A; --ink:#E6EDF4; --ink-soft:#9FB0C2; --ink-faint:#6A7C90;
+    --border:#26364A; --border-soft:#1E2C3C; --accent:#5AA3D6; --accent-2:#7DB9E3; --accent-ink:#BFE0F7; --accent-soft:#1B3347;
+    --cta:#F5A524; --positive:#5FCB98; --positive-soft:#16291F; --negative:#F07A72; --negative-soft:#321C1B;
+    --warn:#E8B64F; --warn-soft:#2E2512; --sheet:#1C2A39; --trim:#2A3A4D; --offcut:#223244; --cutline:#FF8A80;
+    --shadow-sm:0 1px 2px rgba(0,0,0,0.35);
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0E1721; --surface:#15212E; --surface-sunk:#0B121A; --ink:#E6EDF4; --ink-soft:#9FB0C2; --ink-faint:#6A7C90;
+  --border:#26364A; --border-soft:#1E2C3C; --accent:#5AA3D6; --accent-2:#7DB9E3; --accent-ink:#BFE0F7; --accent-soft:#1B3347;
+  --cta:#F5A524; --positive:#5FCB98; --positive-soft:#16291F; --negative:#F07A72; --negative-soft:#321C1B;
+  --warn:#E8B64F; --warn-soft:#2E2512; --sheet:#1C2A39; --trim:#2A3A4D; --offcut:#223244; --cutline:#FF8A80;
+  --shadow-sm:0 1px 2px rgba(0,0,0,0.35);
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 "IBM Plex Sans",system-ui,sans-serif}
+.wrap{max-width:1320px;margin:0 auto;padding:24px 16px 60px}
+header.top{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:18px}
+h1{font-family:Fraunces,Georgia,serif;font-weight:600;font-size:28px;margin:0;color:var(--accent-ink);letter-spacing:-0.01em}
+:root[data-theme="dark"] h1{color:var(--ink)}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) h1{color:var(--ink)}}
+.sub{color:var(--ink-soft);margin-top:2px}
+h2{font-size:15px;font-weight:600;margin:0}
+.grid{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr);gap:16px;align-items:start}
+@media (max-width:960px){.grid{grid-template-columns:1fr}}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow-sm)}
+.card-h{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;padding:12px 14px;border-bottom:1px solid var(--border-soft)}
+.card-b{padding:12px 14px}
+.side{display:flex;flex-direction:column;gap:16px}
+.tools{display:flex;gap:6px;flex-wrap:wrap}
+button,.btn{font:inherit;font-size:13px;font-weight:500;border:1px solid var(--border);background:var(--surface);color:var(--ink);border-radius:var(--radius-sm);padding:6px 11px;cursor:pointer;display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+button:hover,.btn:hover{border-color:var(--accent-2);color:var(--accent)}
+button.primary{background:var(--cta);border-color:var(--cta);color:var(--cta-ink);font-weight:600;font-size:15px;padding:10px 18px;width:100%;justify-content:center}
+button.primary:hover{filter:brightness(1.05);color:var(--cta-ink)}
+button.primary:disabled{opacity:.6;cursor:progress}
+button.ghost{border-color:transparent;background:transparent;color:var(--ink-faint);padding:4px 6px}
+button.ghost:hover{color:var(--negative)}
+.tbl-wrap{max-height:520px;overflow:auto;border-top:1px solid var(--border-soft)}
+table{border-collapse:collapse;width:100%}
+th,td{padding:4px 6px;text-align:left;border-bottom:1px solid var(--border-soft)}
+thead th{position:sticky;top:0;background:var(--accent-soft);color:var(--accent-ink);font-size:12px;font-weight:600;z-index:1}
+td.n,th.n{text-align:right}
+td.idx{color:var(--ink-faint);font:12px "IBM Plex Mono",monospace;width:38px;text-align:right}
+td input[type=text],td input[type=number]{width:100%;font:13px "IBM Plex Mono",monospace;border:1px solid transparent;background:transparent;color:var(--ink);padding:4px 6px;border-radius:6px}
+td input[type=text]{font-family:"IBM Plex Sans",sans-serif}
+td input:hover{border-color:var(--border)}
+td input:focus{outline:none;border-color:var(--accent-2);background:var(--surface)}
+td input.bad{border-color:var(--negative);background:var(--negative-soft)}
+td.c{text-align:center}
+input[type=checkbox]{accent-color:var(--accent);width:16px;height:16px}
+.foot{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;padding:10px 14px;color:var(--ink-soft);font-size:13px}
+.foot b{color:var(--ink);font-family:"IBM Plex Mono",monospace;font-weight:600}
+.field{display:flex;flex-direction:column;gap:4px;margin-bottom:10px}
+.field label{font-size:12px;color:var(--ink-soft);font-weight:500}
+.field input,.field select{font:13px "IBM Plex Sans",sans-serif;padding:7px 9px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface);color:var(--ink)}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.hint{font-size:12px;color:var(--ink-faint)}
+.empty{padding:22px;text-align:center;color:var(--ink-faint)}
+.progress{height:6px;background:var(--surface-sunk);border-radius:99px;overflow:hidden;margin-top:10px}
+.progress i{display:block;height:100%;width:0;background:var(--accent);transition:width .2s}
+#status{font-size:12px;color:var(--ink-soft);margin-top:6px;min-height:1.4em}
+#results{margin-top:22px}
+.res-h{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:12px}
+.res-h h2{font-family:Fraunces,Georgia,serif;font-size:22px;font-weight:600}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:14px}
+.kpi{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:12px 14px}
+.kpi .l{font-size:12px;color:var(--ink-soft)}
+.kpi .v{font:600 22px "IBM Plex Mono",monospace;margin-top:2px}
+.kpi .s{font-size:12px;color:var(--ink-faint);margin-top:2px}
+.kpi.hi{border-color:var(--accent-2);background:var(--accent-soft)}
+.kpi.hi .v{color:var(--accent-ink)}
+.alert{border:1px solid var(--warn);background:var(--warn-soft);color:var(--warn);border-radius:var(--radius);padding:10px 14px;margin-bottom:14px}
+.alert ul{margin:6px 0 0;padding-left:18px}
+.patterns{display:grid;grid-template-columns:repeat(auto-fill,minmax(520px,1fr));gap:14px}
+@media (max-width:600px){.patterns{grid-template-columns:1fr}}
+.pat .card-h{align-items:baseline}
+.pat .t{font-weight:600}
+.pat .t .x{display:inline-block;background:var(--cta);color:var(--cta-ink);font:600 13px "IBM Plex Mono",monospace;border-radius:6px;padding:1px 7px;margin-left:6px}
+.pat .m{font:12px "IBM Plex Mono",monospace;color:var(--ink-soft)}
+.pat svg{display:block;width:100%;height:auto}
+.pat svg text{font-family:"IBM Plex Sans",sans-serif;fill:#14202E}
+.pat svg .dim{fill:var(--ink-soft);font-family:"IBM Plex Mono",monospace}
+.pat table td,.pat table th{font-size:12px;padding:3px 6px}
+.pat table td{font-family:"IBM Plex Mono",monospace}
+.pat table td.mk{font-family:"IBM Plex Sans",sans-serif;color:var(--ink-soft)}
+.sw{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:6px;vertical-align:-1px;border:1px solid rgba(0,0,0,.25)}
+dialog{border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);color:var(--ink);padding:0;width:min(640px,calc(100vw - 32px))}
+dialog::backdrop{background:rgba(10,22,36,.45)}
+dialog textarea{width:100%;min-height:240px;font:12px "IBM Plex Mono",monospace;border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px;background:var(--surface-sunk);color:var(--ink)}
+.dlg-f{display:flex;justify-content:flex-end;gap:8px;padding:12px 14px;border-top:1px solid var(--border-soft)}
+.print-only{display:none}
+html.embed .wrap{max-width:none;padding:4px 2px 32px}
+html.embed header.top{margin-bottom:12px}
+html.embed header.top h1,html.embed #theme{display:none}
+.seg{display:inline-flex;border:1px solid var(--border);border-radius:var(--radius-sm);overflow:hidden}
+.seg button{border:0;border-radius:0;padding:6px 12px;background:var(--surface)}
+.seg button+button{border-left:1px solid var(--border)}
+.seg button.on{background:var(--accent);color:#fff}
+:root[data-theme="dark"] .seg button.on{color:#0E1721}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .seg button.on{color:#0E1721}}
+td input.g{width:64px}
+.cut{display:block;font-size:11px;color:var(--ink-faint)}
+@media print{
+  @page{size:A4 portrait;margin:10mm}
+  body{background:#fff;color:#000;font-size:11px}
+  .wrap{padding:0;max-width:none}
+  .grid,.no-print,header.top .tools{display:none!important}
+  .print-only{display:block}
+  #results{margin-top:0}
+  .card,.kpi{box-shadow:none;border-color:#bbb;background:#fff}
+  .kpi.hi{background:#eef4f9}
+  .patterns{grid-template-columns:1fr;gap:8px}
+  .pat{break-inside:avoid}
+  .pat svg{max-height:118mm;width:auto;max-width:100%;margin:0 auto}
+  .kpis{grid-template-columns:repeat(3,1fr)}
+  :root{--sheet:#F7F9FB;--trim:#E3E8EE;--offcut:#E9EDF1;--cutline:#B4232A;--ink:#000;--ink-soft:#333;--accent-ink:#123B5A;--accent-soft:#eef4f9}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div>
+      <h1>Glass Optimiser</h1>
+      <div class="sub">Guillotine cutting plans for glass sheets. Panel and sheet sizes in <span id="unit-name">mm</span>; trim, kerf and grinder always in mm.</div>
+    </div>
+    <div class="tools">
+      <div class="seg" id="unit" role="group" aria-label="Units"><button data-u="mm">mm</button><button data-u="in">inches</button></div>
+      <button id="theme" title="Light / dark">◐ Theme</button>
+    </div>
+  </header>
+
+  <div class="grid">
+    <section class="card">
+      <div class="card-h">
+        <h2>Panels to cut</h2>
+        <div class="tools">
+          <button id="p-add">+ Row</button>
+          <button id="p-paste">Paste from Excel</button>
+          <label class="btn">Upload file<input id="p-file" type="file" accept=".xlsx,.xls,.csv" hidden></label>
+          <button id="p-tpl">Template</button>
+          <button id="p-clear">Clear</button>
+        </div>
+      </div>
+      <div class="tbl-wrap" id="p-wrap"></div>
+      <div class="foot">
+        <span><b id="p-rows">0</b> rows · <b id="p-pcs">0</b> pcs · <b id="p-sqm">0</b> <span id="p-au">SQM</span></span>
+        <span class="hint">Grinder X / Y (mm) is added to the width / height for cutting; drawings show the finished size. Lock = no rotation.</span>
+      </div>
+    </section>
+
+    <div class="side">
+      <section class="card">
+        <div class="card-h"><h2>Stock sheets</h2><div class="tools"><button id="s-add">+ Sheet size</button></div></div>
+        <div id="s-wrap"></div>
+        <div class="foot"><span class="hint">Available blank = unlimited. Width is the horizontal side in the cutting drawings.</span></div>
+      </section>
+      <section class="card">
+        <div class="card-h"><h2>Settings</h2></div>
+        <div class="card-b">
+          <div class="row2">
+            <div class="field"><label for="trimX">Edge trim X (mm, left &amp; right)</label><input id="trimX" type="number" min="0" step="1"></div>
+            <div class="field"><label for="trimY">Edge trim Y (mm, top &amp; bottom)</label><input id="trimY" type="number" min="0" step="1"></div>
+          </div>
+          <div class="row2">
+            <div class="field"><label for="kerf">Saw kerf (mm per cut)</label><input id="kerf" type="number" min="0" step="0.5"></div>
+            <div></div>
+          </div>
+          <div class="field"><label for="effort">Search time</label>
+            <select id="effort"><option value="3000">Quick (3 s)</option><option value="10000">Normal (10 s)</option><option value="30000">Thorough (30 s)</option><option value="60000">1 minute</option><option value="120000">2 minutes</option><option value="300000">5 minutes</option><option value="600000">10 minutes</option></select>
+            <span class="hint">Longer searches try more layouts. Stop at any time keeps the best plan found so far.</span>
+          </div>
+          <button class="primary" id="run">Optimise</button>
+          <div class="progress"><i id="bar"></i></div>
+          <div id="status"></div>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <section id="results"></section>
+</div>
+
+<dialog id="paste-dlg">
+  <div class="card-h"><h2>Paste panels</h2></div>
+  <div class="card-b">
+    <p class="hint" style="margin-top:0">Copy rows from Excel and paste below. Columns: Mark, Width, Height, Qty, Lock (yes = no rotation), Grinder X (mm), Grinder Y (mm).
+      Width and height in the unit selected at the top (inches may be written 48 1/2 or 48.5). A header row is detected automatically; a header such as “Width (in)” or “Width (mm)” sets the unit.</p>
+    <textarea id="paste-txt" placeholder="W1	1200	900	10		3	3&#10;W2	600	450	24	yes	0	0"></textarea>
+    <label style="display:flex;gap:6px;align-items:center;margin-top:8px;font-size:13px"><input type="checkbox" id="paste-replace" checked> Replace the current panels</label>
+  </div>
+  <div class="dlg-f"><button id="paste-cancel">Cancel</button><button id="paste-ok" style="border-color:var(--accent);color:var(--accent)">Add panels</button></div>
+</dialog>
+
+<script>
+'use strict';
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const num = v => { const n = parseFloat(String(v ?? '').replace(/,/g, '')); return isFinite(n) ? n : NaN; };
+const fmt = (n, d = 0) => Number(n).toLocaleString('en-IN', {minimumFractionDigits: d, maximumFractionDigits: d});
+const KEY = 'glassopt.v1';
+
+// ---------- units: everything is kept in mm; inches are shown to the nearest 1/16" ----------
+const IN = 25.4;
+function inchText(mm, mark){
+  const x = Math.round(mm / IN * 16), whole = Math.floor(x / 16);
+  let n = x % 16, d = 16; while (n && n % 2 === 0) { n /= 2; d /= 2; }
+  return (whole || !n ? String(whole) : '') + (n ? (whole ? ' ' : '') + n + '/' + d : '') + (mark ? '″' : '');
+}
+const mmText = mm => fmt(Math.round(mm * 10) / 10, Math.round(mm * 10) % 10 ? 1 : 0);
+const len = mm => state.unit === 'in' ? inchText(mm, true) : mmText(mm);           // for display
+const lenInput = v => typeof v !== 'number' ? String(v ?? '') : state.unit === 'in' ? inchText(v) : String(Math.round(v * 10) / 10);   // for input boxes
+const size = (w, h) => `${len(w)} × ${len(h)}`;
+// "1200", "48.5", "48 1/2", "48-1/2", "1/2", '48 1/2"' -> mm (NaN if not a length)
+function parseLen(v, unit){
+  if (typeof v === 'number') return unit === 'in' ? Math.round(v * IN * 1e4) / 1e4 : v;
+  let s = String(v ?? '').trim().toLowerCase().replace(/(″|"|inches|inch|in|mm)$/, '').trim().replace(/,/g, '');
+  if (s === '') return NaN;
+  if (unit !== 'in') return /^\d*\.?\d+$/.test(s) ? +s : NaN;
+  const m = s.match(/^(?:(\d*\.?\d+)(?:\s+|\s*-\s*|$))?(?:(\d+)\s*\/\s*(\d+))?$/);
+  if (!m || (!m[1] && !m[2]) || (m[3] && +m[3] === 0)) return NaN;
+  return Math.round(((m[1] ? +m[1] : 0) + (m[2] ? +m[2] / +m[3] : 0)) * IN * 1e4) / 1e4;
+}
+const area = mm2 => state.unit === 'in' ? fmt(mm2 / 92903.04, 2) : fmt(mm2 / 1e6, 2);    // SQM or sq ft
+const areaUnit = () => state.unit === 'in' ? 'sq ft' : 'SQM';
+const xlLen = mm => state.unit === 'in' ? Math.round(mm / IN * 16) / 16 : Math.round(mm * 10) / 10;   // Excel numbers
+const xlArea = mm2 => state.unit === 'in' ? +(mm2 / 92903.04).toFixed(3) : +(mm2 / 1e6).toFixed(3);
+
+// ---------- state ----------
+const DEFAULT_STOCKS = [
+  {use: true, name: '', w: 2440, h: 2100, qty: ''},
+  {use: false, name: '', w: 2800, h: 2100, qty: ''},
+  {use: false, name: '', w: 2440, h: 1830, qty: ''},
+  {use: false, name: '', w: 3660, h: 2140, qty: ''},
+  {use: false, name: '', w: 3300, h: 2100, qty: ''},
+];
+const blankPanel = () => ({mark: '', w: '', h: '', qty: '', lock: false, gx: '', gy: ''});
+let state = {unit: 'mm', panels: [blankPanel()], stocks: DEFAULT_STOCKS.map(s => ({...s})), trimX: 10, trimY: 10, kerf: 0, effort: '30000', v: 3};
+try {
+  const s = JSON.parse(localStorage.getItem(KEY) || 'null');
+  if (s && Array.isArray(s.panels)) {
+    if (s.trim !== undefined && s.trimX === undefined) s.trimX = s.trimY = s.trim; delete s.trim;
+    if (!(s.v >= 2)) s.effort = '30000';                     // search time default: Thorough
+    if (!(s.v >= 3)) {                                       // sizes kept as mm numbers; kerf default 0; auto sheet names
+      s.kerf = 0;
+      const mm = v => v === '' || v == null ? '' : isFinite(num(v)) ? num(v) : v;
+      s.panels = s.panels.map(p => ({...blankPanel(), ...p, w: mm(p.w), h: mm(p.h)}));
+      s.stocks = (s.stocks || []).map(x => ({...x, w: mm(x.w), h: mm(x.h), name: x.name === `${x.w} × ${x.h}` ? '' : x.name || ''}));
+    }
+    s.v = 3; state = {...state, ...s};
+  }
+} catch (e) {}
+let saveT = 0;
+// an input that changes the plan: save, and take the old cutting plan off the page (it no longer matches)
+const changed = () => { save(); clearResults(); };
+function clearResults(){ lastRes = null; const el = document.getElementById('results'); if (el) el.innerHTML = ''; }
+const save = () => { clearTimeout(saveT); saveT = setTimeout(() => { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) {} }, 300); };
+
+// ---------- theme ----------
+if (!document.documentElement.classList.contains('embed')) try { const t = localStorage.getItem(KEY + '.theme'); if (t) document.documentElement.dataset.theme = t; } catch (e) {}
+$('#theme').onclick = () => {
+  const dark = document.documentElement.dataset.theme ? document.documentElement.dataset.theme === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+  document.documentElement.dataset.theme = dark ? 'light' : 'dark';
+  try { localStorage.setItem(KEY + '.theme', document.documentElement.dataset.theme); } catch (e) {}
+};
+
+// ---------- unit switch ----------
+function showUnit(){
+  document.querySelectorAll('#unit button').forEach(b => b.classList.toggle('on', b.dataset.u === state.unit));
+  $('#unit-name').textContent = state.unit === 'in' ? 'inches' : 'mm';
+  $('#p-au').textContent = areaUnit();
+}
+$('#unit').addEventListener('click', e => {
+  const b = e.target.closest('button[data-u]'); if (!b || b.dataset.u === state.unit) return;
+  state.unit = b.dataset.u; save(); showUnit(); renderPanels(); renderStocks();
+  if (lastRes) renderResults(lastJob, lastRes, true);
+});
+
+// ---------- panels table ----------
+const U = () => state.unit === 'in' ? 'in' : 'mm';
+function renderPanels(){
+  const rows = state.panels.map((p, i) => `<tr data-i="${i}">
+    <td class="idx">${i + 1}</td>
+    <td><input type="text" data-k="mark" value="${esc(p.mark)}" placeholder="Mark"></td>
+    <td><input type="text" inputmode="decimal" data-k="w" value="${esc(lenInput(p.w))}"></td>
+    <td><input type="text" inputmode="decimal" data-k="h" value="${esc(lenInput(p.h))}"></td>
+    <td><input type="number" data-k="qty" value="${esc(p.qty)}" min="0" step="1"></td>
+    <td><input type="number" class="g" data-k="gx" value="${esc(p.gx)}" min="0" step="0.5" placeholder="0"></td>
+    <td><input type="number" class="g" data-k="gy" value="${esc(p.gy)}" min="0" step="0.5" placeholder="0"></td>
+    <td class="c"><input type="checkbox" data-k="lock" ${p.lock ? 'checked' : ''}></td>
+    <td class="c"><button class="ghost" data-del title="Remove">✕</button></td></tr>`).join('');
+  $('#p-wrap').innerHTML = `<table><thead><tr><th class="n">#</th><th style="width:26%">Mark</th><th>Width (${U()})</th><th>Height (${U()})</th><th>Qty</th>
+    <th title="Grinding allowance added to the width, in mm">Grinder X (mm)</th><th title="Grinding allowance added to the height, in mm">Grinder Y (mm)</th>
+    <th class="c" title="No rotation">Lock</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
+  totals();
+}
+function totals(){
+  let pcs = 0, a = 0, n = 0;
+  for (const p of state.panels) { const q = num(p.qty); if (typeof p.w === 'number' && typeof p.h === 'number' && p.w > 0 && p.h > 0 && q > 0) { n++; pcs += q; a += p.w * p.h * q; } }
+  $('#p-rows').textContent = fmt(n); $('#p-pcs').textContent = fmt(pcs); $('#p-sqm').textContent = area(a);
+}
+// width/height are stored in mm (a number), or as typed when they are not a length yet (flagged on Optimise)
+const storeLen = v => { if (String(v).trim() === '') return ''; const mm = parseLen(v, state.unit); return isFinite(mm) ? mm : v; };
+$('#p-wrap').addEventListener('input', e => {
+  const tr = e.target.closest('tr[data-i]'), k = e.target.dataset.k; if (!tr || !k) return;
+  const p = state.panels[+tr.dataset.i];
+  p[k] = k === 'lock' ? e.target.checked : k === 'w' || k === 'h' ? storeLen(e.target.value) : e.target.value;
+  e.target.classList.remove('bad');
+  totals(); changed();
+});
+// tidy an inch entry to its 1/16" form when leaving the box
+$('#p-wrap').addEventListener('focusout', e => {
+  const k = e.target.dataset && e.target.dataset.k; if (k !== 'w' && k !== 'h') return;
+  const p = state.panels[+e.target.closest('tr').dataset.i]; if (typeof p[k] === 'number') e.target.value = lenInput(p[k]);
+});
+$('#p-wrap').addEventListener('click', e => {
+  if (!e.target.closest('[data-del]')) return;
+  state.panels.splice(+e.target.closest('tr').dataset.i, 1);
+  if (!state.panels.length) state.panels.push(blankPanel());
+  renderPanels(); changed();
+});
+// Enter in a row's Qty / Grinder Y moves to the next row (adds one at the end)
+$('#p-wrap').addEventListener('keydown', e => {
+  if (e.key !== 'Enter' || !['qty', 'gy'].includes(e.target.dataset.k)) return;
+  const i = +e.target.closest('tr').dataset.i;
+  if (i === state.panels.length - 1) addPanelRow();
+  else $(`#p-wrap tr[data-i="${i + 1}"] input[data-k="mark"]`).focus();
+});
+function addPanelRow(){
+  const last = state.panels[state.panels.length - 1] || {};
+  state.panels.push({...blankPanel(), gx: last.gx ?? '', gy: last.gy ?? ''});   // new rows keep the grinder of the row above
+  renderPanels(); save();
+  const inp = $(`#p-wrap tr[data-i="${state.panels.length - 1}"] input[data-k="mark"]`); inp.focus(); inp.scrollIntoView({block: 'nearest'});
+}
+$('#p-add').onclick = addPanelRow;
+$('#p-clear').onclick = () => {
+  if (!confirm('Remove all panels?')) return;
+  state.panels = [blankPanel()]; renderPanels(); changed();
+};
+
+// ---------- import (paste / file) ----------
+const truthy = v => /^(y|yes|1|true|lock|locked|no rotation|x|✓)$/i.test(String(v ?? '').trim());
+const unitOf = (h, fallback) => /\(in|inch|″|"/.test(h) ? 'in' : /mm/.test(h) ? 'mm' : fallback;
+// rows of cells -> panels (mm). A header row is used when found; without one the columns are, in order:
+// [Mark], Width, Height, Qty, Lock, Grinder X, Grinder Y (Mark when the first cell is not a size)
+function parseRows(rows){
+  rows = rows.map(r => r.map(c => typeof c === 'number' ? c : String(c ?? '').trim())).filter(r => r.some(c => c !== ''));
+  if (!rows.length) return [];
+  const H = rows[0].map(c => String(c).toLowerCase());
+  const find = re => H.findIndex(c => re.test(c));
+  let col = null, unit = state.unit;
+  if (H.some(c => /width|^w\b|height|^h\b|length|qty|quantity|pcs/.test(c))) {
+    col = {mark: find(/mark|ref|name|item|label|code|desc/), w: find(/width|^w\b/), h: find(/height|length|^h\b|^l\b/),
+      qty: find(/qty|quantity|pcs|nos|count|no\.? of/), lock: find(/lock|rotat/),
+      gx: find(/grind.*\bx\b|\bx\b.*grind|^gx/), gy: find(/grind.*\by\b|\by\b.*grind|^gy/)};
+    const g = find(/grind/); if (col.gx < 0 && col.gy < 0 && g >= 0) col.gx = col.gy = g;   // one grinder column = both sides
+    if (col.w < 0 || col.h < 0) col = null; else { unit = unitOf(H[col.w], state.unit); rows = rows.slice(1); }
+  }
+  const out = [];
+  for (const r of rows) {
+    let c = col;
+    if (!c) { const o = isFinite(parseLen(r[0], unit)) ? -1 : 0; c = {mark: o, w: o + 1, h: o + 2, qty: o + 3, lock: o + 4, gx: o + 5, gy: o + 6}; }
+    const cell = i => i >= 0 && i < r.length ? r[i] : '';
+    const p = {mark: String(cell(c.mark)), w: parseLen(cell(c.w), unit), h: parseLen(cell(c.h), unit), qty: num(cell(c.qty)),
+      lock: truthy(cell(c.lock)), gx: num(cell(c.gx)), gy: num(cell(c.gy))};
+    if (!(p.w > 0 && p.h > 0)) continue;
+    out.push({mark: p.mark, w: p.w, h: p.h, qty: p.qty > 0 ? Math.round(p.qty) : 1, lock: p.lock,
+      gx: p.gx > 0 ? p.gx : '', gy: p.gy > 0 ? p.gy : ''});
+  }
+  return out;
+}
+function addParsed(list, replace){
+  if (!list.length) { alert('No panels found. Each row needs a width and a height.'); return; }
+  const keep = replace ? [] : state.panels.filter(p => p.w !== '' || p.h !== '' || String(p.mark).trim());
+  state.panels = keep.concat(list); renderPanels(); changed();
+  setStatus(`${fmt(list.length)} rows imported (${fmt(list.reduce((a, p) => a + p.qty, 0))} pcs).`);
+}
+$('#p-paste').onclick = () => { $('#paste-txt').value = ''; $('#paste-dlg').showModal(); $('#paste-txt').focus(); };
+$('#paste-cancel').onclick = () => $('#paste-dlg').close();
+$('#paste-ok').onclick = () => {
+  const rows = $('#paste-txt').value.split(/\r?\n/).map(l => l.split(l.includes('\t') ? '\t' : /[,;]/));
+  $('#paste-dlg').close(); addParsed(parseRows(rows), $('#paste-replace').checked);
+};
+$('#p-file').onchange = async e => {
+  const f = e.target.files[0]; e.target.value = ''; if (!f) return;
+  try {
+    const wb = XLSX.read(await f.arrayBuffer(), {type: 'array'});
+    const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], {header: 1, raw: true, defval: ''});
+    const list = parseRows(rows);
+    const replace = list.length && state.panels.some(p => p.w !== '') ? confirm(`${list.length} rows found. Replace the current panels?\n(Cancel adds them to the list.)`) : true;
+    addParsed(list, replace);
+  } catch (err) { alert('Could not read the file: ' + err.message); }
+};
+$('#p-tpl').onclick = () => {
+  const inch = state.unit === 'in', u = inch ? 'in' : 'mm';
+  const ws = XLSX.utils.aoa_to_sheet([['Mark', `Width (${u})`, `Height (${u})`, 'Qty', 'Lock', 'Grinder X (mm)', 'Grinder Y (mm)'],
+    inch ? ['W1', '47 1/4', '35 7/16', 10, '', 3, 3] : ['W1', 1200, 900, 10, '', 3, 3],
+    inch ? ['W2', 23.625, '17 3/4', 24, 'yes', 0, 0] : ['W2', 600, 450, 24, 'yes', 0, 0]]);
+  ws['!cols'] = [{wch: 16}, {wch: 12}, {wch: 12}, {wch: 8}, {wch: 8}, {wch: 15}, {wch: 15}];
+  const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'Panels'); XLSX.writeFile(wb, `glass-panels-template-${u}.xlsx`);
+};
+
+// ---------- stock table ----------
+const stockName = s => s.name || (typeof s.w === 'number' && typeof s.h === 'number' ? size(s.w, s.h) : '');
+function renderStocks(){
+  $('#s-wrap').innerHTML = `<table><thead><tr><th class="c" style="width:36px">Use</th><th>Name</th><th style="width:${state.unit === 'in' ? 84 : 72}px">Width</th><th style="width:${state.unit === 'in' ? 84 : 72}px">Height</th><th style="width:78px" title="blank = unlimited">Available</th><th style="width:30px"></th></tr></thead><tbody>${
+    state.stocks.map((s, i) => `<tr data-i="${i}">
+      <td class="c"><input type="checkbox" data-k="use" ${s.use ? 'checked' : ''}></td>
+      <td><input type="text" data-k="name" value="${esc(s.name)}" placeholder="${esc(stockName({...s, name: ''}))}"></td>
+      <td><input type="text" inputmode="decimal" data-k="w" value="${esc(lenInput(s.w))}"></td>
+      <td><input type="text" inputmode="decimal" data-k="h" value="${esc(lenInput(s.h))}"></td>
+      <td><input type="number" data-k="qty" value="${esc(s.qty)}" min="0" step="1" placeholder="∞"></td>
+      <td class="c"><button class="ghost" data-del title="Remove">✕</button></td></tr>`).join('')}</tbody></table>`;
+}
+$('#s-wrap').addEventListener('input', e => {
+  const tr = e.target.closest('tr[data-i]'), k = e.target.dataset.k; if (!tr || !k) return;
+  const s = state.stocks[+tr.dataset.i];
+  s[k] = k === 'use' ? e.target.checked : k === 'w' || k === 'h' ? storeLen(e.target.value) : e.target.value;
+  if (k === 'w' || k === 'h') tr.querySelector('[data-k="name"]').placeholder = stockName({...s, name: ''});
+  if (k === 'name') save(); else changed();
+});
+$('#s-wrap').addEventListener('focusout', e => {
+  const k = e.target.dataset && e.target.dataset.k; if (k !== 'w' && k !== 'h') return;
+  const s = state.stocks[+e.target.closest('tr').dataset.i]; if (typeof s[k] === 'number') e.target.value = lenInput(s[k]);
+});
+$('#s-wrap').addEventListener('click', e => {
+  if (!e.target.closest('[data-del]')) return;
+  state.stocks.splice(+e.target.closest('tr').dataset.i, 1); renderStocks(); changed();
+});
+$('#s-add').onclick = () => { state.stocks.push({use: true, name: '', w: '', h: '', qty: ''}); renderStocks(); save(); };
+
+// ---------- settings ----------
+['trimX', 'trimY', 'kerf', 'effort'].forEach(k => { const el = $('#' + k); el.value = state[k]; el.oninput = () => { state[k] = el.value; k === 'effort' ? save() : changed(); }; });
+const setStatus = t => { $('#status').textContent = t; };
+
+// ---------- run ----------
+const ENGINE_URL = new URL('engine.js', location.href).href;
+let worker = null, lastJob = null, lastRes = null;
+const run = {t0: 0, snap: null, runs: 0};   // the search running now: start time, best plan so far
+function buildJob(){
+  const panels = [], bad = [];
+  state.panels.forEach((p, i) => {
+    if (!String(p.mark).trim() && p.w === '' && p.h === '' && String(p.qty) === '') return;   // empty row
+    const okLen = v => typeof v === 'number' && v > 0, q = num(p.qty);
+    const g = v => String(v ?? '').trim() === '' ? 0 : num(v);
+    const gx = g(p.gx), gy = g(p.gy);
+    const errs = [];
+    if (!okLen(p.w)) errs.push('w'); if (!okLen(p.h)) errs.push('h'); if (!(q > 0) || q !== Math.round(q)) errs.push('qty');
+    if (!(gx >= 0)) errs.push('gx'); if (!(gy >= 0)) errs.push('gy');
+    if (errs.length) errs.forEach(k => bad.push([i, k]));
+    else panels.push({mark: String(p.mark).trim(), w: p.w, h: p.h, qty: q, lock: !!p.lock, gx, gy});
+  });
+  const stocks = state.stocks.filter(s => s.use && typeof s.w === 'number' && typeof s.h === 'number' && s.w > 0 && s.h > 0)
+    .map(s => ({name: stockName(s), w: s.w, h: s.h, qty: s.qty === '' || s.qty == null ? '' : num(s.qty)}));
+  return {panels, stocks, bad, trimX: Math.max(0, num(state.trimX) || 0), trimY: Math.max(0, num(state.trimY) || 0), kerf: Math.max(0, num(state.kerf) || 0), timeLimit: +state.effort || 30000};
+}
+$('#run').onclick = () => {
+  if (worker) {   // stop: keep the best plan found so far
+    const snap = run.snap, job = lastJob, secs = ((Date.now() - run.t0) / 1000).toFixed(0);
+    done();
+    if (snap) { lastRes = snap; renderResults(job, snap); setStatus(`Stopped after ${secs} s: showing the best plan found (${fmt(Math.max(run.runs, snap.runs))} plans tried).`); }
+    else setStatus('Stopped before the first plan was ready.');
+    return;
+  }
+  const job = buildJob();
+  document.querySelectorAll('#p-wrap input.bad').forEach(x => x.classList.remove('bad'));
+  if (job.bad.length) {
+    job.bad.forEach(([i, k]) => { const el = $(`#p-wrap tr[data-i="${i}"] input[data-k="${k}"]`); if (el) el.classList.add('bad'); });
+    const first = $('#p-wrap input.bad'); if (first) { first.scrollIntoView({block: 'center'}); first.focus(); }
+    setStatus(`${job.bad.length} cell(s) need fixing (highlighted): sizes must be positive${state.unit === 'in' ? ' (e.g. 48 1/2 or 48.5)' : ''}, quantities whole numbers, grinder 0 or more.`); return;
+  }
+  if (!job.panels.length) { setStatus('Add some panels first.'); return; }
+  if (!job.stocks.length) { setStatus('Tick at least one stock sheet size.'); return; }
+  delete job.bad;
+  lastJob = job; clearResults();   // the new plan shows when the search ends (or on Stop)
+  $('#run').textContent = 'Stop'; $('#bar').style.width = '0';
+  const t0 = Date.now(), tick = setInterval(() => { $('#bar').style.width = Math.min(100, (Date.now() - t0) / job.timeLimit * 100) + '%'; }, 150);
+  run.t0 = t0; run.snap = null; run.runs = 0;
+  const finish = res => { clearInterval(tick); done(); lastRes = res; renderResults(job, res); };
+  const fail = err => { clearInterval(tick); done(); setStatus('Error: ' + (err.message || err)); };
+  done.tick = tick;
+  try {
+    const src = `importScripts(${JSON.stringify(ENGINE_URL)});
+      onmessage = e => { try { const r = optimise(e.data, p => postMessage({p})); postMessage({r}); } catch (err) { postMessage({err: String(err && err.stack || err)}); } };`;
+    worker = new Worker(URL.createObjectURL(new Blob([src], {type: 'text/javascript'})));
+    worker.onmessage = e => {
+      if (e.data.p) {
+        const p = e.data.p; if (p.snapshot) run.snap = p.snapshot; run.runs = p.runs;
+        const sheets = run.snap ? run.snap.patterns.reduce((a, x) => a + x.count, 0) : 0, left = Math.max(0, Math.ceil((job.timeLimit - (Date.now() - t0)) / 1000));
+        setStatus(`Searching… ${fmt(p.runs)} plans tried · best so far ${fmt(sheets)} sheets (found at ${(p.improvedAt / 1000).toFixed(1)} s) · ${left} s left`);
+      }
+      else if (e.data.r) finish(e.data.r);
+      else if (e.data.err) fail(e.data.err);
+    };
+    worker.onerror = e => { e.preventDefault(); fail(e.message || 'worker failed'); };
+    worker.postMessage(job);
+    setStatus('Searching…');
+  } catch (err) {
+    // no workers (e.g. opened from a file): run here
+    setStatus('Searching…');
+    setTimeout(() => { try { finish(optimise(job)); } catch (e2) { fail(e2); } }, 30);
+  }
+};
+function done(){
+  if (worker) { worker.terminate(); worker = null; }
+  if (done.tick) clearInterval(done.tick);
+  $('#run').textContent = 'Optimise'; $('#bar').style.width = '100%';
+}
+
+// ---------- results ----------
+const PALETTE = [210, 32, 145, 275, 5, 180, 60, 320, 100, 240, 20, 160, 295, 45, 195, 345, 120, 260, 80, 0];
+const colour = t => { const h = PALETTE[t % PALETTE.length], l = 82 - (Math.floor(t / PALETTE.length) % 3) * 7; return {fill: `hsl(${h} 55% ${l}%)`, stroke: `hsl(${h} 45% 38%)`}; };
+const markText = list => list.map(m => m.mark ? (m.pcs > 1 ? `${m.mark} ×${m.pcs}` : m.mark) : (m.pcs > 1 ? `(no mark) ×${m.pcs}` : '(no mark)')).join(', ');
+// finished size of a placed piece, the way it lies on the sheet (the rectangle drawn is the cut size, with grinder)
+const finished = (r, res) => { const t = res.types[r.t], dw = t.dw ?? t.w, dh = t.dh ?? t.h; return r.r ? [dh, dw] : [dw, dh]; };
+// an offcut worth keeping: at least 9" x 12" (228.6 x 304.8 mm), either way round; smaller ones are waste
+const OFFCUT_MIN = [9 * IN, 12 * IN];
+const usableOffcut = o => Math.min(o.w, o.h) >= OFFCUT_MIN[0] - 1e-6 && Math.max(o.w, o.h) >= OFFCUT_MIN[1] - 1e-6;
+const ground = t => (t.dw ?? t.w) !== t.w || (t.dh ?? t.h) !== t.h;
+
+function summarise(job, res){
+  const per = new Map();
+  let sheets = 0, sheetArea = 0, panelArea = 0, pcs = 0;
+  for (const p of res.patterns) {
+    const s = job.stocks[p.stock]; const k = `${p.sheetW} × ${p.sheetH}`;
+    const e = per.get(k) || {name: s.name, w: p.sheetW, h: p.sheetH, count: 0, area: 0, used: 0}; e.count += p.count; e.area += p.sheetW * p.sheetH * p.count; e.used += p.area * p.count; per.set(k, e);
+    sheets += p.count; sheetArea += p.sheetW * p.sheetH * p.count; panelArea += p.area * p.count; pcs += p.placed.length * p.count;
+  }
+  const total = job.panels.reduce((a, p) => a + p.qty, 0);
+  return {per: [...per.values()], sheets, sheetArea, panelArea, pcs, total, unplaced: res.unplaced.reduce((a, u) => a + u.qty, 0)};
+}
+
+function sheetSvg(p, res){
+  const TX = res.trimX, TY = res.trimY, W = p.sheetW, H = p.sheetH, pad = Math.max(W, H) * 0.045, fsD = Math.max(W, H) * 0.022;
+  const out = [`<svg viewBox="${-pad} ${-pad} ${W + pad * 1.4} ${H + pad * 1.4}" role="img" aria-label="Pattern ${p.no}: ${esc(size(W, H))} sheet">`];
+  out.push(`<rect x="0" y="0" width="${W}" height="${H}" style="fill:var(--trim);stroke:var(--ink-soft)" stroke-width="${W / 600}"/>`);
+  out.push(`<rect x="${TX}" y="${TY}" width="${W - 2 * TX}" height="${H - 2 * TY}" style="fill:var(--sheet)"/>`);
+  // every leftover piece is shaded; its size is written when it is at least 9" x 12" (228.6 x 304.8 mm) either way round
+  for (const o of p.offcuts) {
+    out.push(`<rect x="${TX + o.x}" y="${TY + o.y}" width="${o.w}" height="${o.h}" style="fill:var(--offcut)"/>`);
+    if (!usableOffcut(o)) continue;
+    const ocx = TX + o.x + o.w / 2, ocy = TY + o.y + o.h / 2;
+    // label along the long side when that fits better; drop the word "offcut" when the piece is too narrow for it
+    let ot = '', ofs = 0, vert = false;
+    for (const t of [`offcut ${size(o.w, o.h)}`, size(o.w, o.h)]) {
+      const oc = t.length * 0.62, fH = Math.min(o.h / 2.2, o.w * 0.92 / oc, fsD * 1.1), fV = Math.min(o.w / 2.2, o.h * 0.92 / oc, fsD * 1.1);
+      ot = t; ofs = Math.max(fH, fV); vert = fV > fH;
+      if (ofs >= fsD * 0.6) break;
+    }
+    out.push(`<text class="dim" x="${ocx}" y="${ocy}" font-size="${ofs}" text-anchor="middle" dominant-baseline="middle"${vert ? ` transform="rotate(-90 ${ocx} ${ocy})"` : ''}>${esc(ot)}</text>`);
+  }
+  for (const r of p.placed) {
+    const c = colour(r.t), x = TX + r.x, y = TY + r.y, [fw, fh] = finished(r, res);
+    out.push(`<rect x="${x}" y="${y}" width="${r.w}" height="${r.h}" fill="${c.fill}" stroke="${c.stroke}" stroke-width="${W / 700}"/>`);
+    const label = `${size(fw, fh)}${r.r ? ' ↻' : ''}`, ll = label.length * 0.62;
+    // horizontal label, or turned up the side of a tall narrow piece when that reads bigger
+    const fsH = Math.min(r.h / 3.2, r.w * 0.92 / ll, fsD * 1.6), fsV = Math.min(r.w / 3.2, r.h * 0.92 / ll, fsD * 1.6);
+    const vert = fsV > fsH * 1.15, fs = vert ? fsV : fsH, across = vert ? r.w : r.h;   // across = room for a second line
+    if (fs >= fsD * 0.5) {
+      const mk = (res.types[r.t].marks || []);
+      const mtxt = mk.length === 1 ? mk[0] : mk.length > 1 ? mk[0] + ' +' + (mk.length - 1) : '';
+      const two = mtxt && across > fs * 3;
+      const cx = x + r.w / 2, cy = y + r.h / 2, tf = vert ? ` transform="rotate(-90 ${cx} ${cy})"` : '';
+      out.push(`<g${tf}><text x="${cx}" y="${cy - (two ? fs * 0.55 : 0)}" font-size="${fs}" font-weight="600" text-anchor="middle" dominant-baseline="middle">${esc(label)}</text>`);
+      if (two) out.push(`<text x="${cx}" y="${cy + fs * 0.7}" font-size="${fs * 0.8}" text-anchor="middle" dominant-baseline="middle" opacity=".75">${esc(mtxt.length > 16 ? mtxt.slice(0, 15) + '…' : mtxt)}</text>`);
+      out.push('</g>');
+    }
+  }
+  // cut lines, each edge to edge of the piece it splits: the trim cuts first, across the whole sheet, then the pattern's cuts
+  const lw = Math.max(W, H) / 450, lines = [];
+  if (TY > 0) lines.push([0, TY, W, TY], [0, H - TY, W, H - TY]);
+  if (TX > 0) lines.push([TX, TY > 0 ? TY : 0, TX, TY > 0 ? H - TY : H], [W - TX, TY > 0 ? TY : 0, W - TX, TY > 0 ? H - TY : H]);
+  for (const [x1, y1, x2, y2] of p.cuts || []) lines.push([TX + x1, TY + y1, TX + x2, TY + y2]);
+  out.push(`<path d="${lines.map(([x1, y1, x2, y2]) => `M${x1} ${y1}L${x2} ${y2}`).join('')}" style="stroke:var(--cutline)" stroke-width="${lw}" stroke-linecap="square" fill="none"/>`);
+  out.push(`<text class="dim" x="${W / 2}" y="${-pad * 0.35}" font-size="${fsD}" text-anchor="middle">${esc(len(W))}</text>`);
+  out.push(`<text class="dim" x="${-pad * 0.35}" y="${H / 2}" font-size="${fsD}" text-anchor="middle" transform="rotate(-90 ${-pad * 0.35} ${H / 2})">${esc(len(H))}</text>`);
+  out.push('</svg>');
+  return out.join('');
+}
+
+// pieces of a pattern grouped by type and orientation: finished size, cut size, count
+function groups(p, res){
+  const per = new Map();
+  for (const r of p.placed) { const k = `${r.t}|${r.r}`; const e = per.get(k) || {t: r.t, w: r.w, h: r.h, r: r.r, f: finished(r, res), n: 0}; e.n++; per.set(k, e); }
+  return [...per.values()].sort((a, b) => b.w * b.h - a.w * a.h);
+}
+function patternRows(p, res){
+  const marks = new Map(p.marks.map(m => [m.t, m.marks]));
+  return groups(p, res).map(e => {
+    const c = colour(e.t), g = ground(res.types[e.t]);
+    return `<tr><td><span class="sw" style="background:${c.fill};border-color:${c.stroke}"></span>${esc(size(e.f[0], e.f[1]))}${e.r ? ' ↻' : ''}${g ? `<span class="cut">cut ${esc(size(e.w, e.h))}</span>` : ''}</td><td class="n">${e.n}</td><td class="n">${fmt(e.n * p.count)}</td><td class="mk">${esc(markText(marks.get(e.t) || []))}</td></tr>`;
+  }).join('');
+}
+
+function renderResults(job, res, quiet){
+  const S = summarise(job, res), el = $('#results');
+  const yieldPct = S.sheetArea ? S.panelArea / S.sheetArea * 100 : 0, anyGround = res.types.some(ground);
+  if (!quiet) setStatus(`Done: ${fmt(res.runs)} plans tried in ${(res.ms / 1000).toFixed(1)} s; this plan was found at ${((res.improvedAt || 0) / 1000).toFixed(1)} s.`);
+  const un = res.unplaced.length ? `<div class="alert"><b>${fmt(S.unplaced)} pcs could not be placed.</b><ul>${res.unplaced.map(u => {
+    const t = res.types[u.t]; return `<li>${esc(size(t.dw ?? t.w, t.dh ?? t.h))}${ground(t) ? ` (cut ${esc(size(t.w, t.h))})` : ''}${t.marks.length ? ' ' + esc(t.marks.join(', ')) : ''}: ${fmt(u.qty)} pcs, ${esc(u.reason)}</li>`;
+  }).join('')}</ul></div>` : '';
+  const when = new Date().toLocaleString('en-IN', {dateStyle: 'medium', timeStyle: 'short'});
+  el.innerHTML = `
+    <div class="res-h">
+      <div><h2>Cutting plan</h2><div class="hint">${esc(when)} · sizes in ${state.unit === 'in' ? 'inches' : 'mm'} · trim X ${fmt(res.trimX)} / Y ${fmt(res.trimY)} mm · kerf ${fmt(res.kerf, res.kerf % 1 ? 1 : 0)} mm${anyGround ? ' · labels show finished sizes; pieces are cut with the grinder allowance' : ''}</div></div>
+      <div class="tools no-print"><button id="r-print">Print / PDF</button><button id="r-xlsx">Download Excel</button></div>
+    </div>
+    <div class="kpis">
+      <div class="kpi hi"><div class="l">Sheets needed</div><div class="v">${fmt(S.sheets)}</div><div class="s">${S.per.map(e => `${fmt(e.count)} × ${esc(size(e.w, e.h))}`).join(' · ')}</div></div>
+      <div class="kpi hi"><div class="l">Yield</div><div class="v">${yieldPct.toFixed(1)}%</div><div class="s">waste ${area(S.sheetArea - S.panelArea)} ${areaUnit()}</div></div>
+      <div class="kpi"><div class="l">Panels placed</div><div class="v">${fmt(S.pcs)}</div><div class="s">of ${fmt(S.total)} pcs</div></div>
+      <div class="kpi"><div class="l">Glass cut${anyGround ? ' (with grinder)' : ''}</div><div class="v">${area(S.panelArea)}</div><div class="s">${areaUnit()} of ${area(S.sheetArea)} ${areaUnit()} sheet</div></div>
+      <div class="kpi"><div class="l">Cutting patterns</div><div class="v">${fmt(res.patterns.length)}</div><div class="s">distinct sheet layouts</div></div>
+    </div>
+    ${un}
+    <div class="patterns">${res.patterns.map(p => `
+      <article class="card pat">
+        <div class="card-h"><div class="t">Pattern ${p.no} <span class="x">× ${fmt(p.count)}</span></div>
+          <div class="m">${esc(size(p.sheetW, p.sheetH))} · ${p.placed.length} pcs/sheet · yield ${(p.yield * 100).toFixed(1)}%</div></div>
+        <div class="card-b">${sheetSvg(p, res)}</div>
+        <table><thead><tr><th>Size</th><th class="n">Per sheet</th><th class="n">Total</th><th>Marks</th></tr></thead><tbody>${patternRows(p, res)}</tbody></table>
+      </article>`).join('')}</div>`;
+  $('#r-print').onclick = () => window.print();
+  $('#r-xlsx').onclick = () => exportXlsx(job, res);
+  if (!quiet) el.scrollIntoView({behavior: 'smooth', block: 'start'});
+}
+
+function exportXlsx(job, res){
+  const S = summarise(job, res), wb = XLSX.utils.book_new(), u = state.unit === 'in' ? 'in' : 'mm', au = areaUnit();
+  const sum = [['Glass cutting plan', new Date().toLocaleString('en-IN')], ['Sizes in', u === 'in' ? 'inches (nearest 1/16)' : 'mm'], [],
+    ['Sheet size', 'Sheets', `Sheet ${au}`, `Glass cut ${au}`, 'Yield %']];
+  S.per.forEach(e => sum.push([size(e.w, e.h), e.count, xlArea(e.area), xlArea(e.used), +(e.used / e.area * 100).toFixed(2)]));
+  sum.push(['Total', S.sheets, xlArea(S.sheetArea), xlArea(S.panelArea), +(S.panelArea / S.sheetArea * 100).toFixed(2)], [],
+    ['Panels placed', S.pcs], ['Panels ordered', S.total], ['Panels not placed', S.unplaced], ['Cutting patterns', res.patterns.length],
+    ['Edge trim X (mm, left & right)', res.trimX], ['Edge trim Y (mm, top & bottom)', res.trimY], ['Kerf (mm)', res.kerf]);
+  res.unplaced.forEach(x => { const t = res.types[x.t]; sum.push([`Not placed: ${size(t.dw ?? t.w, t.dh ?? t.h)}`, x.qty, x.reason, t.marks.join(', ')]); });
+  const ws1 = XLSX.utils.aoa_to_sheet(sum); ws1['!cols'] = [{wch: 30}, {wch: 12}, {wch: 14}, {wch: 14}, {wch: 10}];
+  XLSX.utils.book_append_sheet(wb, ws1, 'Summary');
+
+  const plan = [['Pattern', 'Sheet size', 'Sheets', 'Yield %', `Finished W (${u})`, `Finished H (${u})`, `Cut W (${u})`, `Cut H (${u})`, 'Rotated', 'Pcs per sheet', 'Total pcs', 'Marks']];
+  for (const p of res.patterns) {
+    const marks = new Map(p.marks.map(m => [m.t, m.marks]));
+    groups(p, res).forEach((e, i) => plan.push([p.no, size(p.sheetW, p.sheetH), i ? '' : p.count, i ? '' : +(p.yield * 100).toFixed(2),
+      xlLen(e.f[0]), xlLen(e.f[1]), xlLen(e.w), xlLen(e.h), e.r ? 'yes' : '', e.n, e.n * p.count, markText(marks.get(e.t) || [])]));
+  }
+  const ws2 = XLSX.utils.aoa_to_sheet(plan); ws2['!cols'] = [{wch: 8}, {wch: 18}, {wch: 8}, {wch: 8}, {wch: 13}, {wch: 13}, {wch: 11}, {wch: 11}, {wch: 8}, {wch: 12}, {wch: 10}, {wch: 50}];
+  XLSX.utils.book_append_sheet(wb, ws2, 'Cutting plan');
+
+  const layout = [['Pattern', 'Sheets', 'Piece', `X (${u})`, `Y (${u})`, `Cut W (${u})`, `Cut H (${u})`, `Finished W (${u})`, `Finished H (${u})`, 'Rotated']];
+  for (const p of res.patterns) p.placed.forEach((r, i) => { const f = finished(r, res);
+    layout.push([p.no, i ? '' : p.count, i + 1, xlLen(r.x + res.trimX), xlLen(r.y + res.trimY), xlLen(r.w), xlLen(r.h), xlLen(f[0]), xlLen(f[1]), r.r ? 'yes' : '']); });
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(layout), 'Positions');
+
+  // offcuts of 9 x 12 in (228.6 x 304.8 mm) or more, per sheet of each pattern
+  const offs = [['Pattern', 'Sheets', `Offcut W (${u})`, `Offcut H (${u})`, `X (${u})`, `Y (${u})`, 'Total offcuts']];
+  for (const p of res.patterns) p.offcuts.filter(usableOffcut).forEach((o, i) =>
+    offs.push([p.no, i ? '' : p.count, xlLen(o.w), xlLen(o.h), xlLen(o.x + res.trimX), xlLen(o.y + res.trimY), p.count]));
+  const ws4 = XLSX.utils.aoa_to_sheet(offs); ws4['!cols'] = [{wch: 8}, {wch: 8}, {wch: 13}, {wch: 13}, {wch: 10}, {wch: 10}, {wch: 12}];
+  XLSX.utils.book_append_sheet(wb, ws4, 'Offcuts');
+
+  const pan = [['Mark', `Width (${u})`, `Height (${u})`, 'Qty', 'Lock', 'Grinder X (mm)', 'Grinder Y (mm)']];
+  job.panels.forEach(p => pan.push([p.mark, u === 'in' ? inchText(p.w) : xlLen(p.w), u === 'in' ? inchText(p.h) : xlLen(p.h), p.qty, p.lock ? 'yes' : '', p.gx || '', p.gy || '']));
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(pan), 'Panels');
+  XLSX.writeFile(wb, `cutting-plan-${new Date().toISOString().slice(0, 10)}.xlsx`);
+}
+
+showUnit(); renderPanels(); renderStocks();
+</script>
+</body>
+</html>
