@@ -46,9 +46,171 @@ function optimise(job, progress){
     minas: (fr, cw, ch) => cw * (fr.h - ch) > (fr.w - cw) * ch,
     maxas: (fr, cw, ch) => cw * (fr.h - ch) <= (fr.w - cw) * ch,
   };
-  const GLOBAL_CAP = 60;   // global mode looks at this many remaining types per placement (keeps big jobs fast)
+  const GLOBAL_CAP = 60, STRIP_CAP = 120;
+  let VAL = null, valGen = 0;   // piece values during a value-correction pass (null = plain area), and their version
+  const stripMemo = new Map();
+  /* Strip packer (as glass optimisers like Optima do): the sheet is cut into strips across its whole length; each strip
+     is filled along its length with columns (best combination by a knapsack over the length); each column is a stack
+     of pieces no wider than the column, the first sets its width; a piece narrower than its column is trimmed with one
+     more cut. dir 'h' = strips along the sheet width (W), 'v' = along its height (worked out transposed, then mapped back).
+     score: 'eff' = the fullest strip first, 'val' = the most glass; noise > 0 randomises the choice (deeper searches). */
+  function stripSheet(s, left, opt){
+    const T = opt.dir === 'v', L = T ? s.H : s.W, HS = T ? s.W : s.H, rem = left.slice();
+    const rnd = opt.rnd || Math.random, noise = opt.noise || 0;
+    // each type's orientations in strip space: [along the strip, across it, real rotation flag]
+    const O = types.map(t => {
+      const real = [[t.w, t.h, false]]; if (t.rot) real.push([t.h, t.w, true]);
+      return real.map(([a, b, r]) => T ? [b, a, r] : [a, b, r]).filter(o => o[0] <= L + EPS && o[1] <= HS + EPS);
+    });
+    // on big jobs only the biggest remaining sizes are considered (keeps it fast; small ones fill in on later sheets)
+    const ids = types.filter(t => rem[t.id] > 0 && O[t.id].length).sort((a, b) => b.w * b.h - a.w * a.h).slice(0, STRIP_CAP).map(t => t.id);
+    const P = [], C = [], F = [];   // strip-space pieces, cuts, leftovers
+    let area = 0;
+    // a column of width cw (set by the leader) and height hs: the leader stacked as often as it fits, then the biggest pieces that fit above
+    function column(lead, o, hs, cnt){
+      const cw = o[0], items = []; let used = 0, a = 0, v = 0;
+      const room = () => hs - used - (items.length ? kerf : 0);
+      const take = (id, oo) => { used += (items.length ? kerf : 0) + oo[1]; items.push({id, o: oo}); cnt[id]--; a += oo[0] * oo[1]; v += VAL ? VAL[id] : oo[0] * oo[1]; };
+      take(lead, o);
+      while (cnt[lead] > 0 && o[1] <= room() + EPS) take(lead, o);
+      for (;;) {
+        let b = null; const r = room();
+        if (r < minDim - EPS) break;
+        for (const id of ids) {
+          if (cnt[id] <= 0) continue;
+          for (const oo of O[id]) if (oo[0] <= cw + EPS && oo[1] <= r + EPS && (!b || oo[0] * oo[1] > b.oo[0] * b.oo[1])) b = {id, oo};
+        }
+        if (!b) break;
+        take(b.id, b.oo);
+      }
+      return {cw, items, a, v};
+    }
+    // fill a strip of height hs: knapsack over the length with the best column for each width, then build the columns
+    // in that order with the real counts, and fill what is left of the length again until nothing fits
+    function fillStrip(hs, cnt0){
+      const key = (T ? 'v' : 'h') + L + 'x' + HS + ':' + hs + '|' + (VAL ? valGen : 'a') + '|' + cnt0.join(',');
+      const hit = stripMemo.get(key); if (hit) return hit;
+      if (stripMemo.size > 20000) stripMemo.clear();
+      const out = fillStripRaw(hs, cnt0); stripMemo.set(key, out); return out;
+    }
+    function fillStripRaw(hs, cnt0){
+      const cnt = cnt0.slice(), cols = []; let x = 0;
+      for (let guard = 0; guard < 20; guard++) {
+        const len = L - x - (cols.length ? kerf : 0);
+        if (len < minDim - EPS) break;
+        const byW = new Map();
+        for (const id of ids) {
+          if (cnt[id] <= 0) continue;
+          for (const o of O[id]) {
+            if (o[1] > hs + EPS || o[0] > len + EPS) continue;
+            const c = column(id, o, hs, cnt.slice()), k = Math.ceil(c.cw + kerf - 1e-9), e = byW.get(k);
+            if (!e || c.v > e.c.v) byW.set(k, {c, id, o});
+          }
+        }
+        if (!byW.size) break;
+        const items = [...byW.entries()], cap = Math.floor(len + kerf + 1e-9), dp = new Float64Array(cap + 1), ch = new Int32Array(cap + 1).fill(-1);
+        for (let v = 1; v <= cap; v++) {
+          dp[v] = dp[v - 1];
+          for (let i = 0; i < items.length; i++) { const k = items[i][0]; if (k <= v && dp[v - k] + items[i][1].c.v > dp[v]) { dp[v] = dp[v - k] + items[i][1].c.v; ch[v] = i; } }
+        }
+        const pick = []; for (let v = cap; v > 0;) { if (ch[v] < 0) v--; else { pick.push(items[ch[v]][1]); v -= items[ch[v]][0]; } }
+        let added = 0;
+        for (const p of pick.sort((a, b) => b.c.cw - a.c.cw)) {
+          if (cnt[p.id] <= 0) continue;
+          const room = L - x - (cols.length ? kerf : 0);
+          if (p.o[0] > room + EPS) continue;
+          const c = column(p.id, p.o, hs, cnt);   // takes from the real counts
+          x += (cols.length ? kerf : 0) + c.cw; cols.push(c); added++;
+        }
+        if (!added) break;
+      }
+      return {cols, cnt, a: cols.reduce((s, c) => s + c.a, 0), v: cols.reduce((s, c) => s + c.v, 0), len: x};
+    }
+    // score 'dp': first choose the best set of strip heights for the whole sheet (a knapsack over its height, each
+    // strip filled as if it were the only one), then build them in turn with the real counts; the rest is chosen strip by strip
+    const plan = [];
+    if (opt.score === 'dp') {
+      const hm = new Map();
+      for (const id of ids) for (const o of O[id]) if (o[1] <= HS + EPS) hm.set(o[1], (hm.get(o[1]) || 0) + o[0] * o[1] * rem[id]);
+      const items = [...hm.entries()].sort((a, b) => b[1] - a[1]).slice(0, 20).map(([h]) => ({h, f: fillStrip(h, rem)})).filter(x => x.f.a > 0)
+        .map(x => ({...x, k: Math.ceil(x.h + kerf - 1e-9), v: x.f.v * (noise ? 1 + (rnd() - 0.5) * noise : 1)}));
+      const cap = Math.floor(HS + kerf + 1e-9), dp = new Float64Array(cap + 1), ch = new Int32Array(cap + 1).fill(-1);
+      for (let v = 1; v <= cap; v++) {
+        dp[v] = dp[v - 1];
+        for (let i = 0; i < items.length; i++) if (items[i].k <= v && dp[v - items[i].k] + items[i].v > dp[v]) { dp[v] = dp[v - items[i].k] + items[i].v; ch[v] = i; }
+      }
+      for (let v = cap; v > 0;) { if (ch[v] < 0) v--; else { plan.push(items[ch[v]]); v -= items[ch[v]].k; } }
+      plan.sort((a, b) => b.f.v / b.h - a.f.v / a.h);
+    }
+    let y = 0;
+    for (;;) {
+      const hr = HS - y - (y > 0 ? kerf : 0);
+      if (hr < minDim - EPS) break;
+      let planned = null;
+      while (plan.length && !planned) { const h = plan.shift().h; if (h <= hr + EPS) { const f = fillStrip(h, rem); if (f.a) planned = {sc: 0, h, f}; } }
+      // candidate strip heights: the across-size of each remaining piece that fits (at most 14, the most glass first)
+      const hm = new Map();
+      for (const id of ids) if (rem[id] > 0) for (const o of O[id]) if (o[1] <= hr + EPS) hm.set(o[1], (hm.get(o[1]) || 0) + o[0] * o[1] * rem[id]);
+      if (!hm.size) break;
+      const hs = [...hm.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10).map(e => e[0]);
+      let best = planned;
+      if (!best) for (const h of hs) {
+        const f = fillStrip(h, rem); if (!f.a) continue;
+        let sc = opt.score === 'val' ? f.v * Math.pow(f.a / (L * h), 2) : f.v / (L * h);
+        if (noise) sc *= 1 + (rnd() - 0.5) * noise;
+        if (!best || sc > best.sc) best = {sc, h, f};
+      }
+      if (!best) break;
+      // place the strip at y: columns along the length, pieces stacked in each column
+      const y0 = y + (y > 0 ? kerf : 0), h = best.h;
+      if (y > 0) C.push([0, y + kerf / 2, L, y + kerf / 2]);
+      let x = 0;
+      best.f.cols.forEach((c, ci) => {
+        const x0 = x + (ci ? kerf : 0);
+        if (ci) C.push([x + kerf / 2, y0, x + kerf / 2, y0 + h]);
+        let yy = y0;
+        c.items.forEach((it, ii) => {
+          const yp = yy + (ii ? kerf : 0), [pw, ph, r] = it.o;
+          if (ii) C.push([x0, yy + kerf / 2, x0 + c.cw, yy + kerf / 2]);
+          P.push({t: it.id, x: x0, y: yp, w: pw, h: ph, r}); area += pw * ph;
+          if (c.cw - pw > EPS) {   // trim a piece narrower than its column
+            const cons = Math.min(pw + kerf, c.cw);
+            C.push([x0 + (pw + cons) / 2, yp, x0 + (pw + cons) / 2, yp + ph]);
+            if (c.cw - cons > EPS) F.push({x: x0 + cons, y: yp, w: c.cw - cons, h: ph});
+          }
+          yy = yp + ph;
+        });
+        if (y0 + h - yy > EPS) {   // above the stack
+          const cons = Math.min(kerf, y0 + h - yy);
+          if (c.items.length) C.push([x0, yy + cons / 2, x0 + c.cw, yy + cons / 2]);
+          if (y0 + h - yy - cons > EPS) F.push({x: x0, y: yy + cons, w: c.cw, h: y0 + h - yy - cons});
+        }
+        x = x0 + c.cw;
+      });
+      if (L - x > EPS) {   // the rest of the strip's length
+        const cons = Math.min(kerf, L - x);
+        C.push([x + cons / 2, y0, x + cons / 2, y0 + h]);
+        if (L - x - cons > EPS) F.push({x: x + cons, y: y0, w: L - x - cons, h});
+      }
+      for (let i = 0; i < rem.length; i++) rem[i] = best.f.cnt[i];
+      y = y0 + h;
+    }
+    if (HS - y > EPS) {
+      const cons = y > 0 ? Math.min(kerf, HS - y) : 0;
+      if (y > 0) C.push([0, y + cons / 2, L, y + cons / 2]);
+      if (HS - y - cons > EPS) F.push({x: 0, y: y + cons, w: L, h: HS - y - cons});
+    }
+    // back to sheet space
+    const placed = P.map(p => T ? {t: p.t, x: p.y, y: p.x, w: p.h, h: p.w, r: p.r} : p);
+    const cuts = C.map(c => T ? [c[1], c[0], c[3], c[2]] : c);
+    const free = [], scrap = [];
+    for (const f of F) { const r = T ? {x: f.y, y: f.x, w: f.h, h: f.w} : f; (r.w >= minDim - EPS && r.h >= minDim - EPS ? free : scrap).push(r); }
+    const cnt = new Map(); for (const p of placed) cnt.set(p.t, (cnt.get(p.t) || 0) + 1);
+    return {placed, cnt, area, free, cuts, scrap};
+  }
 
   function packSheet(s, left, strat, order){
+    if (strat.mode === 'strip') return stripSheet(s, left, strat);
     const free = [{x: 0, y: 0, w: s.W, h: s.H}], placed = [], cnt = new Map(), rem = left.slice(), cuts = [], scrap = [];
     const score = SCORE[strat.fit], split = SPLIT[strat.split];
     let area = 0;
@@ -111,35 +273,48 @@ function optimise(job, progress){
 
   // one plan: sheet after sheet, each packed with every [strategy, order] given (one = a plain run; several = the best
   // sheet of all of them each time), on every stock size left; the highest-yield sheet wins and is repeated.
-  function run(strat, order, mix, deadline){   // past the deadline a run gives up (null)
+  function run(strat, order, mix, deadline, vals, start){   // past the deadline a run gives up (null); vals = value-correction pass
+    VAL = vals || null;
     const tries = mix || [[strat, order]];
-    const rem = types.map(t => unfit.includes(t) ? 0 : t.qty), sLeft = stocks.map(s => s.qty), patterns = [];
+    const rem = start ? start.rem.slice() : types.map(t => unfit.includes(t) ? 0 : t.qty), sLeft = start ? start.sLeft.slice() : stocks.map(s => s.qty);
+    const patterns = start ? start.patterns.slice() : [];
     while (rem.some(q => q > 0)) {
-      if (deadline && Date.now() > deadline) return null;
+      if (deadline && Date.now() > deadline) { VAL = null; return null; }
       let pick = null;
       stocks.forEach((s, si) => {
         if (sLeft[si] <= 0) return;
         for (const [st, ord] of tries) {
           const p = packSheet(s, rem, st, ord);
           if (!p.placed.length) continue;
-          const y = p.area / (s.w * s.h);
+          const y = (VAL ? p.placed.reduce((a, q) => a + VAL[q.t], 0) : p.area) / (s.w * s.h);
           if (!pick || y > pick.y + 1e-9 || (Math.abs(y - pick.y) <= 1e-9 && p.area > pick.p.area)) pick = {s, si, p, y};
         }
       });
       if (!pick) break;
-      let k = sLeft[pick.si];
-      for (const [t, c] of pick.p.cnt) k = Math.min(k, Math.floor(rem[t] / c));
-      k = Math.max(1, k);
-      for (const [t, c] of pick.p.cnt) rem[t] -= c * k;
-      sLeft[pick.si] -= k;
-      patterns.push({stock: pick.s.i, count: k, placed: pick.p.placed, free: pick.p.free, scrap: pick.p.scrap, cuts: pick.p.cuts, area: pick.p.area});
+      commit(pick, rem, sLeft, patterns);
     }
+    VAL = null;
+    return {patterns, rem, key: keyOf(patterns, rem)};
+  }
+  // take a packed sheet: repeat it as often as the quantities (and that stock) allow
+  function commit(pick, rem, sLeft, patterns){
+    let k = sLeft[pick.si];
+    for (const [t, c] of pick.p.cnt) k = Math.min(k, Math.floor(rem[t] / c));
+    k = Math.max(1, k);
+    for (const [t, c] of pick.p.cnt) rem[t] -= c * k;
+    sLeft[pick.si] -= k;
+    patterns.push({stock: pick.s.i, count: k, yield: pick.p.area / (pick.s.w * pick.s.h), placed: pick.p.placed, free: pick.p.free, scrap: pick.p.scrap, cuts: pick.p.cuts, area: pick.p.area});
+  }
+  function keyOf(patterns, rem){
     const left = rem.reduce((a, b) => a + b, 0);
     const sheetArea = patterns.reduce((a, p) => { const s = stocks.find(x => x.i === p.stock); return a + p.count * s.w * s.h; }, 0);
     const last = patterns[patterns.length - 1];
     const offcut = last ? Math.max(0, ...last.free.map(r => r.w * r.h)) : 0;
-    return {patterns, rem, key: [left, sheetArea, patterns.length, -offcut]};
+    // the least-used sheet: the less glass on it, the tighter all the others and the bigger the remnant left
+    const leastUsed = patterns.length ? Math.min(...patterns.map(p => p.area)) : 0;
+    return [left, sheetArea, leastUsed, patterns.length, -offcut];
   }
+
   const better = (a, b) => { for (let i = 0; i < a.length; i++) { if (a[i] < b[i] - 1e-6) return true; if (a[i] > b[i] + 1e-6) return false; } return false; };
 
   // strategies
@@ -155,6 +330,9 @@ function optimise(job, progress){
     strategies.push({mode: 'order', sort, fit, split});
   for (const fit of ['baf', 'bssf', 'blsf']) for (const split of ['slas', 'llas', 'minas'])
     strategies.push({mode: 'global', sort: 'area', fit, split});
+  // strip packers: strips along the width or the height, fullest strip first or most glass
+  const STRIPS = [];
+  for (const dir of ['h', 'v']) for (const score of ['eff', 'val', 'dp']) STRIPS.push([{mode: 'strip', dir, score}, null]);
 
   // the best plan so far goes out with the progress (at most once a second) so the page can stop early and keep it
   let bestRun = null, bestStrat = null, runs = 0, improvedAt = 0, dirty = false, lastSnap = 0;
@@ -171,6 +349,10 @@ function optimise(job, progress){
     // sheet by sheet, the best of all the ordered strategies
     const ordered = strategies.filter(st => st.mode === 'order').map(st => [st, live.slice().sort(SORTS[st.sort])]);
     consider(run(null, null, ordered), {mode: 'mix', of: ordered.length});
+    // the strip packers are slow on jobs with very many sizes: if a plan with them does not finish in 40% of the time, they are left out
+    let useStrips = true;
+    { const r = run(null, null, ordered.concat(STRIPS), t0 + limit * 0.4); if (r) consider(r, {mode: 'mix', of: ordered.length + STRIPS.length}); else useStrips = false; }
+    const noStrip = tries => useStrips ? tries : tries.filter(([st]) => st.mode !== 'strip');
     if (progress) progress({runs, best: bestRun.key, improvedAt});
     for (const st of strategies) {
       consider(run(st, live.slice().sort(SORTS[st.sort]), null, bestRun ? t0 + limit : 0), st);
@@ -185,9 +367,75 @@ function optimise(job, progress){
     const shuffled = () => { const noise = 0.1 + rnd() * 0.6, keyOf = new Map(live.map(t => [t.id, t.w * t.h * (1 + (rnd() - 0.5) * noise)]));
       return live.slice().sort((a, b) => keyOf.get(b.id) - keyOf.get(a.id)); };
     const randStrat = () => ({mode: 'order', sort: 'random', fit: fits[Math.floor(rnd() * 3)], split: splits[Math.floor(rnd() * 4)]});
+    /* value correction (sequential value correction, as glass optimisers do): sheet after sheet is packed to the
+       highest value per area; after each plan, pieces that sat on poorly used sheets are worth more, so the next plan
+       places them earlier and in better company. Each pass packs every sheet with the strip packers (two randomised)
+       and a few free-rectangle orders by value. */
+    const SVC_EXP = job.svcExp || 1.5, SVC_G = job.svcG || 0.5, SVC_NOISE = job.svcNoise ?? 0.05;
+    const vals = new Float64Array(types.length); types.forEach(t => { vals[t.id] = t.w * t.h; });
+    const svc = () => {
+      const jit = () => 1 + (rnd() - 0.5) * 0.1;
+      const byVal = () => { const k = new Map(live.map(t => [t.id, vals[t.id] * jit()])); return live.slice().sort((a, b) => k.get(b.id) - k.get(a.id)); };
+      const tries = STRIPS.concat([[{mode: 'strip', dir: 'h', score: 'eff', noise: 0.3, rnd}, null], [{mode: 'strip', dir: 'v', score: 'eff', noise: 0.3, rnd}, null],
+        [{mode: 'strip', dir: 'h', score: 'dp', noise: 0.3, rnd}, null], [{mode: 'strip', dir: 'v', score: 'dp', noise: 0.3, rnd}, null]]);
+      for (let i = 0; i < 6; i++) tries.push([{mode: 'order', fit: fits[i % 3], split: splits[Math.floor(rnd() * 4)]}, byVal()]);
+      const r = run(null, null, noStrip(tries), t0 + limit, vals);
+      if (!r) return;
+      consider(r, {mode: 'value', of: tries.length});
+      // a piece on a sheet used y is worth area / y^1.5 next time (the emptier its sheet, the earlier it should go)
+      const sum = new Float64Array(types.length), n = new Float64Array(types.length);
+      for (const p of r.patterns) for (const q of p.placed) { const t = types[q.t]; sum[q.t] += p.count * t.w * t.h / Math.pow(Math.max(p.yield, 0.05), SVC_EXP); n[q.t] += p.count; }
+      types.forEach(t => { if (n[t.id]) vals[t.id] = (1 - SVC_G) * vals[t.id] + SVC_G * sum[t.id] / n[t.id] * (1 + (rnd() - 0.5) * SVC_NOISE); });
+      valGen++;
+      if (progress && runs % 3 === 0) progress({runs, best: bestRun.key, improvedAt});
+    };
+    /* repack: take the least-used sheet of the best plan and a few others, and pack their pieces again on their own
+       (value-corrected passes on the small job), so the glass moves onto the fuller sheets and the last one empties. */
+    const REPACK_K = job.repackK || 3, REPACK_PASSES = job.repackPasses || 6, REPACK_P = job.repackP ?? 0.5;
+    const repack = () => {
+      const sheets = [];
+      bestRun.patterns.forEach((p, i) => { for (let c = 0; c < p.count; c++) sheets.push(i); });
+      if (sheets.length < 2) return;
+      let low = 0; bestRun.patterns.forEach((p, i) => { if (p.area < bestRun.patterns[low].area) low = i; });
+      const take = new Set([sheets.lastIndexOf(low)]);
+      const k = Math.min(sheets.length, 2 + Math.floor(rnd() * REPACK_K));
+      while (take.size < k) {
+        // emptier sheets more often
+        const j = Math.floor(rnd() * sheets.length), y = bestRun.patterns[sheets[j]].yield;
+        if (rnd() < 1.15 - y) take.add(j);
+      }
+      const rem = types.map(() => 0), sLeft = stocks.map(s => s.qty), keep = new Map();
+      sheets.forEach((pi, j) => {
+        const p = bestRun.patterns[pi];
+        if (take.has(j)) { for (const q of p.placed) rem[q.t]++; }
+        else { keep.set(pi, (keep.get(pi) || 0) + 1); const si = stocks.findIndex(s => s.i === p.stock); sLeft[si]--; }
+      });
+      // pieces the best plan left unplaced go in too
+      const done = types.map(() => 0); for (const p of bestRun.patterns) for (const q of p.placed) done[q.t] += p.count;
+      types.forEach((t, i) => { if (!unfit.includes(t)) rem[i] += t.qty - done[i]; });
+      const patterns = [...keep].map(([pi, c]) => ({...bestRun.patterns[pi], count: c}));
+      const start = {rem, sLeft, patterns};
+      const v = new Float64Array(types.length); types.forEach(t => { v[t.id] = t.w * t.h; });
+      const sub = live.filter(t => rem[t.id] > 0);
+      for (let pass = 0; pass < REPACK_PASSES; pass++) {
+        const jit = () => 1 + (rnd() - 0.5) * 0.2;
+        const byVal = () => { const kk = new Map(sub.map(t => [t.id, v[t.id] * jit()])); return sub.slice().sort((a, b) => kk.get(b.id) - kk.get(a.id)); };
+        const tries = STRIPS.concat([[{mode: 'strip', dir: 'h', score: 'dp', noise: 0.3, rnd}, null], [{mode: 'strip', dir: 'v', score: 'dp', noise: 0.3, rnd}, null]]);
+        for (let i = 0; i < 6; i++) tries.push([{mode: 'order', fit: fits[i % 3], split: splits[Math.floor(rnd() * 4)]}, byVal()]);
+        const r = run(null, null, noStrip(tries), t0 + limit, pass ? v : null, start);
+        if (!r) return;
+        consider(r, {mode: 'repack', sheets: k, pass});
+        const sum = new Float64Array(types.length), n = new Float64Array(types.length);
+        for (const p of r.patterns.slice(patterns.length)) for (const q of p.placed) { const t = types[q.t]; sum[q.t] += p.count * t.w * t.h / Math.pow(Math.max(p.yield, 0.05), SVC_EXP); n[q.t] += p.count; }
+        types.forEach(t => { if (n[t.id]) v[t.id] = 0.5 * v[t.id] + 0.5 * sum[t.id] / n[t.id] * (1 + (rnd() - 0.5) * 0.1); });
+        valGen++;
+      }
+    };
     let turn = 0;
     while (Date.now() - t0 < limit) {
-      if (turn++ % 2) {
+      if (bestRun && rnd() < REPACK_P) { repack(); continue; }
+      if (turn % 4 !== 3) { turn++; svc(); continue; }
+      if (turn++ % 8 === 7) {
         const base = ordered.filter(() => rnd() < 0.5), extra = Array.from({length: 4 + Math.floor(rnd() * 8)}, () => [randStrat(), shuffled()]);
         consider(run(null, null, base.concat(extra), t0 + limit), {mode: 'mix', of: base.length + extra.length, random: extra.length});
         if (progress && runs % 10 === 0) progress({runs, best: bestRun.key, improvedAt});
