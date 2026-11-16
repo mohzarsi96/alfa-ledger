@@ -23,6 +23,15 @@
             "value": "no-cache"
           }
         ]
+      },
+      {
+        "source": "/optimiser/**",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "no-cache"
+          }
+        ]
       }
     ]
   }
