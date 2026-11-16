@@ -928,9 +928,39 @@ function render(){
 /* ============================================================
    GLASS OPTIMISER
    A self-contained page in public/optimiser/ (guillotine cutting plans; source: the glass-optimiser folder),
-   shown in a frame so its styles and scripts stay apart from the ledger's. No Firestore: inputs stay in the browser.
+   shown in a frame so its styles and scripts stay apart from the ledger's. What is on screen stays in the browser;
+   saved projects go to Firestore through window.optimiserStore below (the frame is on the same site and calls it).
    The frame is kept when the ledger re-renders (data snapshots), so a search in progress is not lost.
    ============================================================ */
+/* Saved projects: companies/{co}/optimiserProjects/{id} is the list entry (name, customer, notes, totals, saved
+   when and by whom); optimiserProjectData/{id} holds everything entered and the cutting plan (JSON text), read only
+   when a project is opened, so the list stays light. Switching company reloads the app, so the frame always
+   saves to the company on screen. */
+window.optimiserStore = {
+  shared: true,
+  co: () => currentCompany,
+  where: () => companyLabel(company()),
+  async list(){
+    const snap = await fb.getDocs(colRef('optimiserProjects'));
+    return snap.docs.map(d => ({...d.data(), id: d.id}));
+  },
+  async load(id){
+    const [m, d] = await Promise.all([fb.getDoc(docRef('optimiserProjects/'+id)), fb.getDoc(docRef('optimiserProjectData/'+id))]);
+    if(!m.exists() || !d.exists()) throw new Error('project not found');
+    return {meta: {...m.data(), id}, data: d.data()};
+  },
+  async save(id, meta, data){
+    const me = state.me || {}, by = me.name || me.email || '';
+    id = id || (Date.now().toString(36) + Math.random().toString(36).slice(2, 8));
+    await fb.setDoc(docRef('optimiserProjectData/'+id), data);
+    await fb.setDoc(docRef('optimiserProjects/'+id), {...meta, by, byUid: me.uid || ''});
+    return {id, by};
+  },
+  async remove(id){
+    await fb.deleteDoc(docRef('optimiserProjects/'+id));
+    await fb.deleteDoc(docRef('optimiserProjectData/'+id));
+  },
+};
 function renderOptimiser(page){
   if(!page.querySelector('#opt-frame')){
     page.innerHTML = `

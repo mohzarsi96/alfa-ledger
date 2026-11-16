@@ -115,6 +115,16 @@ dialog::backdrop{background:rgba(10,22,36,.45)}
 dialog textarea{width:100%;min-height:240px;font:12px "IBM Plex Mono",monospace;border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px;background:var(--surface-sunk);color:var(--ink)}
 .dlg-f{display:flex;justify-content:flex-end;gap:8px;padding:12px 14px;border-top:1px solid var(--border-soft)}
 .print-only{display:none}
+.projbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:8px 12px;margin-bottom:14px;box-shadow:var(--shadow-sm)}
+.projbar .pn{font-weight:600}
+.projbar .pm{font-size:12px;color:var(--ink-faint)}
+.projbar .tools{margin-left:auto}
+button.save{border-color:var(--accent);color:var(--accent);font-weight:600}
+.plist{max-height:min(460px,60vh);overflow:auto;border-top:1px solid var(--border-soft)}
+.plist td{font-size:13px;vertical-align:top}
+.pm{font-size:12px;color:var(--ink-faint)}
+.plist tr.cur td{background:var(--accent-soft)}
+dialog .field textarea{min-height:70px;font:13px "IBM Plex Sans",sans-serif}
 html.embed .wrap{max-width:none;padding:4px 2px 32px}
 html.embed header.top{margin-bottom:12px}
 html.embed header.top h1,html.embed #theme{display:none}
@@ -155,6 +165,8 @@ td input.g{width:64px}
       <button id="theme" title="Light / dark">◐ Theme</button>
     </div>
   </header>
+
+  <div class="projbar no-print" id="projbar"></div>
 
   <div class="grid">
     <section class="card">
@@ -218,6 +230,24 @@ td input.g{width:64px}
   <div class="dlg-f"><button id="paste-cancel">Cancel</button><button id="paste-ok" style="border-color:var(--accent);color:var(--accent)">Add panels</button></div>
 </dialog>
 
+<dialog id="save-dlg">
+  <div class="card-h"><h2>Save project</h2></div>
+  <div class="card-b">
+    <div class="field"><label for="sv-name">Project name</label><input id="sv-name" type="text" maxlength="120" placeholder="e.g. Aika building, 5 mm brown tinted"></div>
+    <div class="field"><label for="sv-cust">Customer / site (optional)</label><input id="sv-cust" type="text" maxlength="120"></div>
+    <div class="field"><label for="sv-notes">Notes (optional)</label><textarea id="sv-notes" maxlength="2000"></textarea></div>
+    <p class="hint" id="sv-where" style="margin:0"></p>
+    <p class="hint" id="sv-err" style="margin:6px 0 0;color:var(--negative)"></p>
+  </div>
+  <div class="dlg-f"><button id="sv-cancel">Cancel</button><button id="sv-new">Save as new</button><button id="sv-ok" class="save">Save</button></div>
+</dialog>
+
+<dialog id="proj-dlg" style="width:min(860px,calc(100vw - 32px))">
+  <div class="card-h"><h2>Saved projects</h2><input id="pj-q" type="search" placeholder="Search name, customer, notes" style="font:13px 'IBM Plex Sans',sans-serif;padding:6px 9px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface);color:var(--ink);min-width:220px"></div>
+  <div class="plist" id="pj-list"></div>
+  <div class="dlg-f" style="justify-content:space-between;align-items:center"><span class="hint" id="pj-where"></span><button id="pj-close">Close</button></div>
+</dialog>
+
 <script>
 'use strict';
 const $ = s => document.querySelector(s);
@@ -261,7 +291,8 @@ const DEFAULT_STOCKS = [
   {use: false, name: '', w: 3300, h: 2100, qty: ''},
 ];
 const blankPanel = () => ({mark: '', w: '', h: '', qty: '', lock: false, gx: '', gy: ''});
-let state = {unit: 'mm', panels: [blankPanel()], stocks: DEFAULT_STOCKS.map(s => ({...s})), trimX: 10, trimY: 10, kerf: 0, effort: '30000', v: 3};
+let state = {unit: 'mm', panels: [blankPanel()], stocks: DEFAULT_STOCKS.map(s => ({...s})), trimX: 10, trimY: 10, kerf: 0, effort: '30000', v: 3,
+  project: null, dirty: false};   // project: the saved project on screen {id, co, name, customer, notes, savedAt, by, ...}; dirty: changed since saved/opened
 try {
   const s = JSON.parse(localStorage.getItem(KEY) || 'null');
   if (s && Array.isArray(s.panels)) {
@@ -273,13 +304,14 @@ try {
       s.panels = s.panels.map(p => ({...blankPanel(), ...p, w: mm(p.w), h: mm(p.h)}));
       s.stocks = (s.stocks || []).map(x => ({...x, w: mm(x.w), h: mm(x.h), name: x.name === `${x.w} × ${x.h}` ? '' : x.name || ''}));
     }
+    if (s.dirty === undefined) s.dirty = true;               // inputs from before projects existed: not saved
     s.v = 3; state = {...state, ...s};
   }
 } catch (e) {}
 let saveT = 0;
 // an input that changes the plan: save, and take the old cutting plan off the page (it no longer matches)
-const changed = () => { save(); clearResults(); };
-function clearResults(){ lastRes = null; const el = document.getElementById('results'); if (el) el.innerHTML = ''; }
+const changed = () => { state.dirty = true; save(); clearResults(); showProject(); };
+function clearResults(){ lastRes = null; lastWhen = null; const el = document.getElementById('results'); if (el) el.innerHTML = ''; }
 const save = () => { clearTimeout(saveT); saveT = setTimeout(() => { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) {} }, 300); };
 
 // ---------- theme ----------
@@ -443,7 +475,7 @@ $('#s-wrap').addEventListener('input', e => {
   const s = state.stocks[+tr.dataset.i];
   s[k] = k === 'use' ? e.target.checked : k === 'w' || k === 'h' ? storeLen(e.target.value) : e.target.value;
   if (k === 'w' || k === 'h') tr.querySelector('[data-k="name"]').placeholder = stockName({...s, name: ''});
-  if (k === 'name') save(); else changed();
+  if (k === 'name') { state.dirty = true; save(); showProject(); } else changed();
 });
 $('#s-wrap').addEventListener('focusout', e => {
   const k = e.target.dataset && e.target.dataset.k; if (k !== 'w' && k !== 'h') return;
@@ -461,7 +493,7 @@ const setStatus = t => { $('#status').textContent = t; };
 
 // ---------- run ----------
 const ENGINE_URL = new URL('engine.js', location.href).href;
-let worker = null, lastJob = null, lastRes = null;
+let worker = null, lastJob = null, lastRes = null, lastWhen = null;
 const run = {t0: 0, snap: null, runs: 0};   // the search running now: start time, best plan so far
 function buildJob(){
   const panels = [], bad = [];
@@ -620,16 +652,17 @@ function patternRows(p, res){
 
 function renderResults(job, res, quiet){
   const S = summarise(job, res), el = $('#results');
+  if (!lastWhen) lastWhen = new Date().toISOString();
   const yieldPct = S.sheetArea ? S.panelArea / S.sheetArea * 100 : 0, anyGround = res.types.some(ground);
   if (!quiet) setStatus(`Done: ${fmt(res.runs)} plans tried in ${(res.ms / 1000).toFixed(1)} s; this plan was found at ${((res.improvedAt || 0) / 1000).toFixed(1)} s.`);
   const un = res.unplaced.length ? `<div class="alert"><b>${fmt(S.unplaced)} pcs could not be placed.</b><ul>${res.unplaced.map(u => {
     const t = res.types[u.t]; return `<li>${esc(size(t.dw ?? t.w, t.dh ?? t.h))}${ground(t) ? ` (cut ${esc(size(t.w, t.h))})` : ''}${t.marks.length ? ' ' + esc(t.marks.join(', ')) : ''}: ${fmt(u.qty)} pcs, ${esc(u.reason)}</li>`;
   }).join('')}</ul></div>` : '';
-  const when = new Date().toLocaleString('en-IN', {dateStyle: 'medium', timeStyle: 'short'});
+  const when = new Date(lastWhen).toLocaleString('en-IN', {dateStyle: 'medium', timeStyle: 'short'}), P = curProject();
   el.innerHTML = `
     <div class="res-h">
-      <div><h2>Cutting plan</h2><div class="hint">${esc(when)} · sizes in ${state.unit === 'in' ? 'inches' : 'mm'} · trim X ${fmt(res.trimX)} / Y ${fmt(res.trimY)} mm · kerf ${fmt(res.kerf, res.kerf % 1 ? 1 : 0)} mm${anyGround ? ' · labels show finished sizes; pieces are cut with the grinder allowance' : ''}</div></div>
-      <div class="tools no-print"><button id="r-print">Print / PDF</button><button id="r-xlsx">Download Excel</button></div>
+      <div><h2>Cutting plan${P ? ' · ' + esc(P.name) : ''}</h2><div class="hint">${P && P.customer ? esc(P.customer) + ' · ' : ''}${esc(when)} · sizes in ${state.unit === 'in' ? 'inches' : 'mm'} · trim X ${fmt(res.trimX)} / Y ${fmt(res.trimY)} mm · kerf ${fmt(res.kerf, res.kerf % 1 ? 1 : 0)} mm${anyGround ? ' · labels show finished sizes; pieces are cut with the grinder allowance' : ''}</div></div>
+      <div class="tools no-print"><button id="r-save" class="save">Save project</button><button id="r-print">Print / PDF</button><button id="r-xlsx">Download Excel</button></div>
     </div>
     <div class="kpis">
       <div class="kpi hi"><div class="l">Sheets needed</div><div class="v">${fmt(S.sheets)}</div><div class="s">${S.per.map(e => `${fmt(e.count)} × ${esc(size(e.w, e.h))}`).join(' · ')}</div></div>
@@ -647,13 +680,14 @@ function renderResults(job, res, quiet){
         <table><thead><tr><th>Size</th><th class="n">Per sheet</th><th class="n">Total</th><th>Marks</th></tr></thead><tbody>${patternRows(p, res)}</tbody></table>
       </article>`).join('')}</div>`;
   $('#r-print').onclick = () => window.print();
+  $('#r-save').onclick = () => openSave();
   $('#r-xlsx').onclick = () => exportXlsx(job, res);
   if (!quiet) el.scrollIntoView({behavior: 'smooth', block: 'start'});
 }
 
 function exportXlsx(job, res){
   const S = summarise(job, res), wb = XLSX.utils.book_new(), u = state.unit === 'in' ? 'in' : 'mm', au = areaUnit();
-  const sum = [['Glass cutting plan', new Date().toLocaleString('en-IN')], ['Sizes in', u === 'in' ? 'inches (nearest 1/16)' : 'mm'], [],
+  const P = curProject(), sum = [['Glass cutting plan', new Date(lastWhen || Date.now()).toLocaleString('en-IN')], ...(P ? [['Project', P.name], ...(P.customer ? [['Customer / site', P.customer]] : [])] : []), ['Sizes in', u === 'in' ? 'inches (nearest 1/16)' : 'mm'], [],
     ['Sheet size', 'Sheets', `Sheet ${au}`, `Glass cut ${au}`, 'Yield %']];
   S.per.forEach(e => sum.push([size(e.w, e.h), e.count, xlArea(e.area), xlArea(e.used), +(e.used / e.area * 100).toFixed(2)]));
   sum.push(['Total', S.sheets, xlArea(S.sheetArea), xlArea(S.panelArea), +(S.panelArea / S.sheetArea * 100).toFixed(2)], [],
@@ -687,10 +721,151 @@ function exportXlsx(job, res){
   const pan = [['Mark', `Width (${u})`, `Height (${u})`, 'Qty', 'Lock', 'Grinder X (mm)', 'Grinder Y (mm)']];
   job.panels.forEach(p => pan.push([p.mark, u === 'in' ? inchText(p.w) : xlLen(p.w), u === 'in' ? inchText(p.h) : xlLen(p.h), p.qty, p.lock ? 'yes' : '', p.gx || '', p.gy || '']));
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(pan), 'Panels');
-  XLSX.writeFile(wb, `cutting-plan-${new Date().toISOString().slice(0, 10)}.xlsx`);
+  const pn = P ? P.name.replace(/[\\/:*?"<>|]+/g, ' ').trim().slice(0, 60) + '-' : '';
+  XLSX.writeFile(wb, `cutting-plan-${pn}${new Date().toISOString().slice(0, 10)}.xlsx`);
 }
 
-showUnit(); renderPanels(); renderStocks();
+// ---------- projects: everything entered plus the cutting plan ----------
+// In a ledger app the ledger keeps them in its database for the company (window.parent.optimiserStore, same site);
+// opened on its own, the page keeps them in this browser.
+// A store: {co(), where(), shared, list() -> [meta], load(id) -> {meta, data}, save(id|null, meta, data) -> {id, by}, remove(id)}.
+const newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+const localStore = {
+  co: () => 'local', where: () => 'this browser', shared: false,
+  idx(){ try { return JSON.parse(localStorage.getItem(KEY + '.projects') || '[]'); } catch (e) { return []; } },
+  async list(){ return this.idx(); },
+  async load(id){
+    const meta = this.idx().find(p => p.id === id), data = JSON.parse(localStorage.getItem(KEY + '.project.' + id) || 'null');
+    if (!meta || !data) throw new Error('project not found'); return {meta, data};
+  },
+  async save(id, meta, data){
+    id = id || newId();
+    try { localStorage.setItem(KEY + '.project.' + id, JSON.stringify(data)); } catch (e) { throw new Error('this browser has no room left to save it'); }
+    const idx = this.idx().filter(p => p.id !== id); idx.push({...meta, id}); localStorage.setItem(KEY + '.projects', JSON.stringify(idx));
+    return {id, by: ''};
+  },
+  async remove(id){ localStorage.removeItem(KEY + '.project.' + id); localStorage.setItem(KEY + '.projects', JSON.stringify(this.idx().filter(p => p.id !== id))); },
+};
+const STORE = (() => { try { if (window.parent !== window && window.parent.optimiserStore) return window.parent.optimiserStore; } catch (e) {} return localStore; })();
+// the project on screen, if it belongs to this store (and company)
+const curProject = () => state.project && state.project.co === STORE.co() ? state.project : null;
+const whenText = iso => iso ? new Date(iso).toLocaleString('en-IN', {dateStyle: 'medium', timeStyle: 'short'}) : '';
+// the project bar: which project is on screen, saved when and by whom
+function showProject(){
+  const P = curProject();
+  $('#projbar').innerHTML = (P
+    ? `<span class="pn">${esc(P.name)}</span><span class="pm">${P.customer ? esc(P.customer) + ' · ' : ''}saved ${esc(whenText(P.savedAt))}${P.by ? ' by ' + esc(P.by) : ''}${state.dirty ? ' · <b style="color:var(--warn)">changed since saved</b>' : ''}</span>`
+    : `<span class="pn">New project</span><span class="pm">not saved: optimise, then Save project</span>`)
+    + `<div class="tools"><button id="pj-open">Saved projects</button><button id="pj-new">New project</button></div>`;
+  $('#pj-open').onclick = openProjects; $('#pj-new').onclick = newProject;
+}
+// JSON (lengths to 0.0001 mm), kept as text: the database takes no lists inside lists (cut lines are)
+const pack = v => JSON.stringify(v, (k, x) => typeof x === 'number' && !Number.isInteger(x) ? Math.round(x * 1e4) / 1e4 : x);
+// gzip (where the browser can) and base64: a plan of thousands of panels shrinks well under the 1 MB a record may hold
+async function zip(text){
+  if (typeof CompressionStream === 'undefined') return text;
+  const buf = new Uint8Array(await new Response(new Blob([text]).stream().pipeThrough(new CompressionStream('gzip'))).arrayBuffer());
+  let bin = ''; for (let i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode.apply(null, buf.subarray(i, i + 0x8000));
+  return 'gz:' + btoa(bin);
+}
+async function unzip(v){
+  if (typeof v !== 'string' || !v.startsWith('gz:')) return v;
+  const bin = atob(v.slice(3)), buf = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
+  return new Response(new Blob([buf]).stream().pipeThrough(new DecompressionStream('gzip'))).text();
+}
+const inputs = () => ({unit: state.unit, panels: state.panels, stocks: state.stocks, trimX: state.trimX, trimY: state.trimY, kerf: state.kerf, effort: state.effort});
+
+function openSave(){
+  if (!lastRes) return;
+  const P = curProject();
+  $('#sv-name').value = P ? P.name : ''; $('#sv-cust').value = P ? P.customer || '' : ''; $('#sv-notes').value = P ? P.notes || '' : '';
+  $('#sv-ok').textContent = P ? 'Save changes' : 'Save'; $('#sv-new').hidden = !P; $('#sv-err').textContent = '';
+  $('#sv-where').textContent = STORE.shared ? `Saved in ${STORE.where()}: everyone with the Glass Optimiser tab can open it.` : 'Saved in this browser only.';
+  $('#save-dlg').showModal(); $('#sv-name').focus();
+}
+async function doSave(asNew){
+  const name = $('#sv-name').value.trim(); if (!name) { $('#sv-err').textContent = 'Give the project a name.'; $('#sv-name').focus(); return; }
+  if (!lastRes) { $('#save-dlg').close(); return; }
+  const P = asNew ? null : curProject();
+  const S = summarise(lastJob, lastRes), savedAt = new Date().toISOString();
+  const meta = {name, customer: $('#sv-cust').value.trim(), notes: $('#sv-notes').value.trim(), unit: state.unit,
+    rows: lastJob.panels.length, pcs: S.total, placed: S.pcs, sheets: S.sheets, yield: S.sheetArea ? +(S.panelArea / S.sheetArea * 100).toFixed(2) : 0,
+    sheetSizes: S.per.map(e => `${e.count} × ${size(e.w, e.h)}`).join(', '), plannedAt: lastWhen, savedAt, createdAt: P && P.createdAt || savedAt};
+  const data = {v: 1, inputs: await zip(pack(inputs())), job: await zip(pack(lastJob)), plan: await zip(pack(lastRes))};
+  const bytes = data.inputs.length + data.job.length + data.plan.length;
+  if (bytes > 950000) { $('#sv-err').textContent = `This plan is too big to save (${fmt(bytes / 1e6, 1)} MB; the limit is about 0.9 MB). Split the job into smaller ones.`; return; }
+  $('#sv-ok').disabled = $('#sv-new').disabled = true; $('#sv-err').textContent = 'Saving…';
+  try {
+    const out = await STORE.save(P ? P.id : null, meta, data);
+    state.project = {...meta, id: out.id, by: out.by || '', co: STORE.co()}; state.dirty = false; save();
+    $('#save-dlg').close(); showProject(); renderResults(lastJob, lastRes, true);
+    setStatus(`Saved “${name}”${STORE.shared ? ' in ' + STORE.where() : ' in this browser'}.`);
+  } catch (err) { $('#sv-err').textContent = 'Could not save: ' + (err.message || err); }
+  finally { $('#sv-ok').disabled = $('#sv-new').disabled = false; }
+}
+$('#sv-cancel').onclick = () => $('#save-dlg').close();
+$('#sv-ok').onclick = () => doSave(false);
+$('#sv-new').onclick = () => doSave(true);
+
+let projList = [];
+async function openProjects(){
+  $('#pj-where').textContent = STORE.shared ? `Projects of ${STORE.where()}` : 'Projects saved in this browser';
+  $('#pj-q').value = ''; $('#pj-list').innerHTML = '<div class="empty">Loading…</div>'; $('#proj-dlg').showModal();
+  try { projList = (await STORE.list()).sort((a, b) => String(b.savedAt).localeCompare(String(a.savedAt))); listProjects(); }
+  catch (err) { $('#pj-list').innerHTML = `<div class="empty">Could not load the projects: ${esc(err.message || err)}</div>`; }
+}
+function listProjects(){
+  const q = $('#pj-q').value.trim().toLowerCase(), P = curProject();
+  const rows = projList.filter(p => !q || [p.name, p.customer, p.notes].some(x => String(x || '').toLowerCase().includes(q)));
+  $('#pj-list').innerHTML = !projList.length ? '<div class="empty">No saved projects yet. Optimise, then press Save project.</div>'
+    : !rows.length ? '<div class="empty">No project matches.</div>'
+    : `<table><thead><tr><th>Project</th><th class="n">Pcs</th><th>Sheets</th><th>Saved</th><th></th></tr></thead><tbody>${rows.map(p => `
+      <tr data-id="${esc(p.id)}" class="${P && p.id === P.id ? 'cur' : ''}"><td><b>${esc(p.name)}</b>${p.customer ? `<div class="pm">${esc(p.customer)}</div>` : ''}${p.notes ? `<div class="pm">${esc(p.notes.length > 90 ? p.notes.slice(0, 89) + '…' : p.notes)}</div>` : ''}</td>
+        <td class="n">${fmt(p.pcs || 0)}</td><td>${fmt(p.sheets || 0)}<div class="pm">${esc(p.sheetSizes || '')}${p.yield ? ' · yield ' + p.yield + '%' : ''}</div></td>
+        <td>${esc(whenText(p.savedAt))}${p.by ? `<div class="pm">${esc(p.by)}</div>` : ''}</td>
+        <td class="c" style="white-space:nowrap"><button data-open>Open</button> <button class="ghost" data-del title="Delete">✕</button></td></tr>`).join('')}</tbody></table>`;
+}
+$('#pj-q').oninput = listProjects;
+$('#pj-close').onclick = () => $('#proj-dlg').close();
+$('#pj-list').addEventListener('click', async e => {
+  const tr = e.target.closest('tr[data-id]'); if (!tr) return;
+  const p = projList.find(x => x.id === tr.dataset.id); if (!p) return;
+  if (e.target.closest('[data-del]')) {
+    if (!confirm(`Delete the project “${p.name}”?${STORE.shared ? ' It is removed for everyone.' : ''} This cannot be undone.`)) return;
+    try { await STORE.remove(p.id); } catch (err) { alert('Could not delete: ' + (err.message || err)); return; }
+    projList = projList.filter(x => x.id !== p.id); listProjects();
+    const P = curProject(); if (P && P.id === p.id) { state.project = null; save(); showProject(); if (lastRes) renderResults(lastJob, lastRes, true); }
+    return;
+  }
+  if (e.target.closest('[data-open]')) openProject(p);
+});
+const hasInput = () => state.panels.some(p => p.w !== '' || p.h !== '' || String(p.mark).trim());
+async function openProject(p){
+  if (worker) { alert('Stop the search first.'); return; }
+  if (state.dirty && hasInput() && !confirm(`Open “${p.name}”? The panels and settings on screen${curProject() ? ' (changed since saved)' : ' (not saved)'} will be replaced.`)) return;
+  let got;
+  try { got = await STORE.load(p.id); } catch (err) { alert('Could not open the project: ' + (err.message || err)); return; }
+  const meta = got.meta;
+  let inp, job, plan;
+  try { [inp, job, plan] = await Promise.all([got.data.inputs, got.data.job, got.data.plan].map(unzip)); }
+  catch (err) { alert('Could not read the project: ' + (err.message || err)); return; }
+  state = {...state, ...JSON.parse(inp), v: 3, project: {...meta, id: p.id, co: STORE.co()}, dirty: false}; save();
+  ['trimX', 'trimY', 'kerf', 'effort'].forEach(k => { $('#' + k).value = state[k]; });
+  $('#proj-dlg').close(); clearResults(); showUnit(); renderPanels(); renderStocks(); showProject();
+  if (plan && job) {
+    lastJob = JSON.parse(job); lastRes = JSON.parse(plan); lastWhen = meta.plannedAt || meta.savedAt;
+    renderResults(lastJob, lastRes, true);
+    setStatus(`Opened “${meta.name}” with its saved cutting plan. Optimise again only if you want to look for a new plan.`);
+  } else setStatus(`Opened “${meta.name}”.`);
+}
+function newProject(){
+  if (worker) { alert('Stop the search first.'); return; }
+  if (state.dirty && hasInput() && !confirm('Start a new project? The panels on screen' + (curProject() ? ' (changed since saved)' : ' (not saved)') + ' will be cleared.')) return;
+  state.panels = [blankPanel()]; state.project = null; state.dirty = false; save();
+  clearResults(); renderPanels(); showProject(); setStatus('New project: enter the panels, then Optimise.');
+}
+
+showUnit(); renderPanels(); renderStocks(); showProject();
 </script>
 </body>
 </html>

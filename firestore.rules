@@ -89,6 +89,14 @@ service cloud.firestore {
         allow read: if member(co);
         allow write: if tab(co, 'masters');
       }
+
+      // Glass Optimiser: saved projects (the list entry, and what was entered with the cutting plan).
+      match /optimiserProjects/{id} {
+        allow read, write: if tab(co, 'optimiser');
+      }
+      match /optimiserProjectData/{id} {
+        allow read, write: if tab(co, 'optimiser');
+      }
     }
   }
 }
