@@ -4629,27 +4629,119 @@ window.fb = {
 
 showCompanyBrand();
 document.getElementById('btn-switch-company').addEventListener('click', ()=>openCompanySwitcher());
-document.getElementById('btn-signout').addEventListener('click', async ()=>{
-  await signOut(auth);
+document.getElementById('btn-signout').addEventListener('click', ()=>signOutNow(''));
+
+/* ---------- Sign-in rules (every company) ----------
+   One device per user: each sign-in writes a new id to sessions/{uid} and keeps it on the device
+   (localStorage, shared by its tabs). A device whose id is no longer the latest signs itself out and
+   says why on the sign-in screen.
+   Idle: 15 minutes without a click, key, scroll, touch or mouse move in any tab of the app on this
+   device (the Glass Optimiser frame included) signs out; a warning counts down the last minute.
+   Reopening the app more than 15 minutes after the last activity signs out too. */
+const SESSION_KEY = 'ledger.session', ACTIVE_KEY = 'ledger.lastActive', REASON_KEY = 'ledger.signoutReason';
+const IDLE_MS = 15*60*1000, WARN_MS = 60*1000;
+const lsGet = k=>{ try{ return localStorage.getItem(k); }catch(e){ return null; } };
+const lsSet = (k, v)=>{ try{ v == null ? localStorage.removeItem(k) : localStorage.setItem(k, v); }catch(e){} };
+let signingOut = false;
+async function signOutNow(reason){
+  if(signingOut) return; signingOut = true;
+  lsSet(REASON_KEY, reason || null); lsSet(SESSION_KEY, null);
+  try{ await signOut(auth); }catch(e){ console.warn('Sign-out failed', e); }
   // Don't leave the company's data on a shared computer. Clearing fails while the app is open in
   // another tab; the copy is then removed by the next sign-out with only this tab open.
   try{ await terminate(db); await clearIndexedDbPersistence(db); }
   catch(e){ console.warn('Could not clear the offline copy', e); }
   location.reload();   // drops live listeners and in-memory data
-});
+}
+function deviceName(){
+  const ua = navigator.userAgent;
+  const os = /Android/.test(ua) ? 'Android' : /iPhone|iPad|iPod/.test(ua) ? 'iPhone / iPad' : /Windows/.test(ua) ? 'Windows' : /Macintosh/.test(ua) ? 'Mac' : /Linux/.test(ua) ? 'Linux' : '';
+  const br = /Edg\//.test(ua) ? 'Edge' : /OPR\//.test(ua) ? 'Opera' : /Firefox\//.test(ua) ? 'Firefox' : /Chrome\//.test(ua) ? 'Chrome' : /Safari\//.test(ua) ? 'Safari' : '';
+  return [br, os].filter(Boolean).join(' on ') || 'another browser';
+}
+const clock = iso=>{ try{ return new Date(iso).toLocaleString('en-IN', {dateStyle:'medium', timeStyle:'short'}); }catch(e){ return ''; } };
+// returns false when this device has to sign out instead
+async function startSession(user, fresh){
+  const last = +lsGet(ACTIVE_KEY) || 0;
+  if(!fresh && last && Date.now() - last > IDLE_MS){ signOutNow('You were signed out after 15 minutes without activity.'); return false; }
+  markActive(true);
+  let mine = lsGet(SESSION_KEY);
+  if(fresh || !mine){
+    mine = Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+    lsSet(SESSION_KEY, mine);
+    try{ await setDoc(doc(db, 'sessions/'+user.uid), {id: mine, at: new Date().toISOString(), device: deviceName(), email: user.email || ''}); }
+    catch(e){ console.warn('Could not record the sign-in', e); }
+  }
+  onSnapshot(doc(db, 'sessions/'+user.uid), snap=>{
+    const d = snap.data();
+    // a newer sign-in elsewhere (checked against the server, not this device's copy)
+    if(d && d.id && d.id !== mine && !snap.metadata.fromCache)
+      signOutNow(`You were signed out because your account was signed in on another device (${d.device || 'another browser'}, ${clock(d.at)}). Only one device can be signed in at a time.`);
+  }, e=>console.warn('Sign-in watch failed', e));
+  startIdleWatch();
+  return true;
+}
+let lastMark = 0;
+function markActive(force){
+  const now = Date.now();
+  if(!force && now - lastMark < 5000) return;   // a write every 5 s at most
+  lastMark = now; lsSet(ACTIVE_KEY, String(now));
+}
+function startIdleWatch(){
+  const hooked = new WeakSet();
+  const hook = w=>{
+    if(!w || hooked.has(w)) return; hooked.add(w);
+    ['pointerdown','keydown','wheel','touchstart','scroll','mousemove','input'].forEach(ev=>w.addEventListener(ev, ()=>markActive(false), {capture:true, passive:true}));
+  };
+  hook(window);
+  let warn = null;
+  setInterval(()=>{
+    // the Glass Optimiser frame (same site) counts as the app
+    document.querySelectorAll('iframe').forEach(f=>{ try{ if(f.contentWindow && f.contentWindow.document) hook(f.contentWindow); }catch(e){} });
+    const idle = Date.now() - (+lsGet(ACTIVE_KEY) || Date.now());
+    if(idle >= IDLE_MS){ signOutNow('You were signed out after 15 minutes without activity.'); return; }
+    if(idle >= IDLE_MS - WARN_MS){
+      if(!warn){
+        warn = document.createElement('div');
+        warn.setAttribute('role', 'alert');
+        warn.style.cssText = 'position:fixed;left:50%;bottom:26px;transform:translateX(-50%);z-index:300;background:var(--ink);color:var(--bg);padding:12px 16px;border-radius:10px;font-size:13px;display:flex;gap:12px;align-items:center;box-shadow:0 8px 24px rgba(0,0,0,.25);max-width:calc(100vw - 32px)';
+        warn.innerHTML = '<span></span><button class="btn btn-sm btn-primary">Stay signed in</button>';
+        warn.querySelector('button').addEventListener('click', ()=>markActive(true));
+        document.body.appendChild(warn);
+      }
+      warn.querySelector('span').textContent = `No activity for a while: signing out in ${Math.max(0, Math.ceil((IDLE_MS - idle)/1000))} s.`;
+    }else if(warn){ warn.remove(); warn = null; }
+  }, 1000);
+}
 
-let started = false;
+let started = false, freshSignIn = false;
 onAuthStateChanged(auth, user=>{
   if(user){
     document.getElementById('login-overlay')?.remove();
     document.getElementById('signed-in-as').textContent = user.email;
     document.getElementById('sidebar-foot').hidden = false;
-    if(!started){ started = true; startApp(user); }
+    if(!started){
+      started = true;
+      const fresh = freshSignIn; freshSignIn = false;
+      if(fresh) lsSet(REASON_KEY, null);
+      startSession(user, fresh).then(ok=>{ if(ok) startApp(user); });
+    }
+  }else if(started){
+    if(!signingOut) location.reload();   // signed out in another tab: clear this one too
   }else{
     showLogin(
-      (email, password)=>signInWithEmailAndPassword(auth, email, password),
+      (email, password)=>{ freshSignIn = true; return signInWithEmailAndPassword(auth, email, password).catch(e=>{ freshSignIn = false; throw e; }); },
       email=>sendPasswordResetEmail(auth, email),
     );
+    // why the last session ended (another device, or inactivity)
+    const why = lsGet(REASON_KEY), box = document.querySelector('#login-overlay h2');
+    if(why && box){
+      const p = document.createElement('p');
+      p.setAttribute('role', 'status');
+      p.style.cssText = 'margin:0 0 12px;padding:10px 12px;border-radius:8px;font-size:13px;background:var(--warn-soft, #FDF1D6);color:var(--warn, #9A6208);border:1px solid currentColor';
+      p.textContent = why;
+      box.after(p);
+    }
   }
 });
 </script>
