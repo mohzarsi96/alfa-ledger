@@ -950,6 +950,8 @@ window.optimiserStore = {
     return {meta: {...m.data(), id}, data: d.data()};
   },
   async save(id, meta, data){
+    // made in the frame: copied into this page first (Firestore takes only plain objects from its own page)
+    meta = JSON.parse(JSON.stringify(meta)); data = JSON.parse(JSON.stringify(data));
     const me = state.me || {}, by = me.name || me.email || '';
     id = id || (Date.now().toString(36) + Math.random().toString(36).slice(2, 8));
     await fb.setDoc(docRef('optimiserProjectData/'+id), data);
