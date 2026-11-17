@@ -181,7 +181,12 @@ function optimise(job, progress){
       }
       if (!best) break;
       // place the strip at y: columns along the length, pieces stacked in each column
-      const y0 = y + (y > 0 ? kerf : 0), h = best.h;
+      // the strip is only as high as its tallest column: its height was picked before it was filled, and when no panel
+      // of that height went in (taken by an earlier strip, or the knapsack chose others) a band would be left empty
+      // across the whole sheet between this strip and the next
+      let h = 0;
+      for (const c of best.f.cols) { let t = 0; c.items.forEach((it, i) => { t += (i ? kerf : 0) + it.o[1]; }); h = Math.max(h, t); }
+      const y0 = y + (y > 0 ? kerf : 0);
       if (y > 0) C.push([0, y + kerf / 2, L, y + kerf / 2]);
       let x = 0;
       best.f.cols.forEach((c, ci) => {
