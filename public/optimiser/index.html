@@ -205,8 +205,8 @@ td input.g{width:64px}
             <div></div>
           </div>
           <div class="field"><label for="effort">Search time</label>
-            <select id="effort"><option value="3000">Quick (3 s)</option><option value="10000">Normal (10 s)</option><option value="30000">Thorough (30 s)</option><option value="60000">1 minute</option><option value="120000">2 minutes</option><option value="300000">5 minutes</option><option value="600000">10 minutes</option></select>
-            <span class="hint">Longer searches try more layouts. Stop at any time keeps the best plan found so far.</span>
+            <select id="effort"><option value="auto">Auto (stops when the plan stops improving)</option><option value="3000">Quick (3 s)</option><option value="10000">Normal (10 s)</option><option value="30000">Thorough (30 s)</option><option value="60000">1 minute</option><option value="120000">2 minutes</option><option value="300000">5 minutes</option><option value="600000">10 minutes</option></select>
+            <span class="hint">Auto stops once the plan uses the fewest sheets possible or has stopped getting better: quick for a few sizes, longer for many sizes and stock sizes. Stop at any time keeps the best plan found so far.</span>
           </div>
           <button class="primary" id="run">Optimise</button>
           <div class="progress"><i id="bar"></i></div>
@@ -291,7 +291,7 @@ const DEFAULT_STOCKS = [
   {use: false, name: '', w: 3300, h: 2100, qty: ''},
 ];
 const blankPanel = () => ({mark: '', w: '', h: '', qty: '', lock: false, gx: '', gy: ''});
-let state = {unit: 'mm', panels: [blankPanel()], stocks: DEFAULT_STOCKS.map(s => ({...s})), trimX: 10, trimY: 10, kerf: 0, effort: '30000', v: 3,
+let state = {unit: 'mm', panels: [blankPanel()], stocks: DEFAULT_STOCKS.map(s => ({...s})), trimX: 10, trimY: 10, kerf: 0, effort: 'auto', v: 4,
   project: null, dirty: false};   // project: the saved project on screen {id, co, name, customer, notes, savedAt, by, ...}; dirty: changed since saved/opened
 try {
   const s = JSON.parse(localStorage.getItem(KEY) || 'null');
@@ -305,7 +305,8 @@ try {
       s.stocks = (s.stocks || []).map(x => ({...x, w: mm(x.w), h: mm(x.h), name: x.name === `${x.w} × ${x.h}` ? '' : x.name || ''}));
     }
     if (s.dirty === undefined) s.dirty = true;               // inputs from before projects existed: not saved
-    s.v = 3; state = {...state, ...s};
+    if (!(s.v >= 4)) s.effort = 'auto';                      // search time default: Auto
+    s.v = 4; state = {...state, ...s};
   }
 } catch (e) {}
 let saveT = 0;
@@ -510,7 +511,8 @@ function buildJob(){
   });
   const stocks = state.stocks.filter(s => s.use && typeof s.w === 'number' && typeof s.h === 'number' && s.w > 0 && s.h > 0)
     .map(s => ({name: stockName(s), w: s.w, h: s.h, qty: s.qty === '' || s.qty == null ? '' : num(s.qty)}));
-  return {panels, stocks, bad, trimX: Math.max(0, num(state.trimX) || 0), trimY: Math.max(0, num(state.trimY) || 0), kerf: Math.max(0, num(state.kerf) || 0), timeLimit: +state.effort || 30000};
+  return {panels, stocks, bad, trimX: Math.max(0, num(state.trimX) || 0), trimY: Math.max(0, num(state.trimY) || 0), kerf: Math.max(0, num(state.kerf) || 0),
+    auto: state.effort === 'auto', timeLimit: +state.effort || 30000};
 }
 $('#run').onclick = () => {
   if (worker) {   // stop: keep the best plan found so far
@@ -532,8 +534,10 @@ $('#run').onclick = () => {
   delete job.bad;
   lastJob = job; clearResults();   // the new plan shows when the search ends (or on Stop)
   $('#run').textContent = 'Stop'; $('#bar').style.width = '0';
-  const t0 = Date.now(), tick = setInterval(() => { $('#bar').style.width = Math.min(100, (Date.now() - t0) / job.timeLimit * 100) + '%'; }, 150);
-  run.t0 = t0; run.snap = null; run.runs = 0;
+  // Auto: the bar runs to when the search would stop if nothing better turns up (it moves out when a better plan comes)
+  const endAt = () => job.auto ? run.stopAt || 20000 : job.timeLimit;
+  const t0 = Date.now(), tick = setInterval(() => { $('#bar').style.width = Math.min(100, (Date.now() - t0) / endAt() * 100) + '%'; }, 150);
+  run.t0 = t0; run.snap = null; run.runs = 0; run.stopAt = 0;
   const finish = res => { clearInterval(tick); done(); lastRes = res; renderResults(job, res); };
   const fail = err => { clearInterval(tick); done(); setStatus('Error: ' + (err.message || err)); };
   done.tick = tick;
@@ -543,9 +547,10 @@ $('#run').onclick = () => {
     worker = new Worker(URL.createObjectURL(new Blob([src], {type: 'text/javascript'})));
     worker.onmessage = e => {
       if (e.data.p) {
-        const p = e.data.p; if (p.snapshot) run.snap = p.snapshot; run.runs = p.runs;
-        const sheets = run.snap ? run.snap.patterns.reduce((a, x) => a + x.count, 0) : 0, left = Math.max(0, Math.ceil((job.timeLimit - (Date.now() - t0)) / 1000));
-        setStatus(`Searching… ${fmt(p.runs)} plans tried · best so far ${fmt(sheets)} sheets (found at ${(p.improvedAt / 1000).toFixed(1)} s) · ${left} s left`);
+        const p = e.data.p; if (p.snapshot) run.snap = p.snapshot; run.runs = p.runs; if (p.stopAt) run.stopAt = p.stopAt;
+        const sheets = run.snap ? run.snap.patterns.reduce((a, x) => a + x.count, 0) : 0, left = Math.max(0, Math.ceil((endAt() - (Date.now() - t0)) / 1000));
+        const gap = p.lbSheets && sheets ? ` · the glass area alone needs ${fmt(p.lbSheets)}${sheets > p.lbSheets ? ` (${fmt(sheets - p.lbSheets)} more used)` : ''}` : '';
+        setStatus(`Searching… ${fmt(p.runs)} plans tried · best so far ${fmt(sheets)} sheets (found at ${(p.improvedAt / 1000).toFixed(1)} s)${gap} · ${job.auto ? `stops in about ${left} s unless it finds better` : `${left} s left`}`);
       }
       else if (e.data.r) finish(e.data.r);
       else if (e.data.err) fail(e.data.err);
@@ -654,7 +659,12 @@ function renderResults(job, res, quiet){
   const S = summarise(job, res), el = $('#results');
   if (!lastWhen) lastWhen = new Date().toISOString();
   const yieldPct = S.sheetArea ? S.panelArea / S.sheetArea * 100 : 0, anyGround = res.types.some(ground);
-  if (!quiet) setStatus(`Done: ${fmt(res.runs)} plans tried in ${(res.ms / 1000).toFixed(1)} s; this plan was found at ${((res.improvedAt || 0) / 1000).toFixed(1)} s.`);
+  if (!quiet) {
+    const s = x => (x / 1000).toFixed(1) + ' s', why = !res.auto ? '' : res.stopReason === 'best' ? ' Auto stopped: this is the fewest sheets possible.'
+      : res.stopReason === 'settled' ? ` Auto stopped: no better plan in the last ${s(res.ms - (res.improvedAt || 0))}.`
+      : res.stopReason === 'cap' ? ` Auto stopped at its ${s(res.cap)} limit for a job this size.` : '';
+    setStatus(`Done: ${fmt(res.runs)} plans tried in ${s(res.ms)}; this plan was found at ${s(res.improvedAt || 0)}.${why}`);
+  }
   const un = res.unplaced.length ? `<div class="alert"><b>${fmt(S.unplaced)} pcs could not be placed.</b><ul>${res.unplaced.map(u => {
     const t = res.types[u.t]; return `<li>${esc(size(t.dw ?? t.w, t.dh ?? t.h))}${ground(t) ? ` (cut ${esc(size(t.w, t.h))})` : ''}${t.marks.length ? ' ' + esc(t.marks.join(', ')) : ''}: ${fmt(u.qty)} pcs, ${esc(u.reason)}</li>`;
   }).join('')}</ul></div>` : '';
@@ -849,7 +859,7 @@ async function openProject(p){
   let inp, job, plan;
   try { [inp, job, plan] = await Promise.all([got.data.inputs, got.data.job, got.data.plan].map(unzip)); }
   catch (err) { alert('Could not read the project: ' + (err.message || err)); return; }
-  state = {...state, ...JSON.parse(inp), v: 3, project: {...meta, id: p.id, co: STORE.co()}, dirty: false}; save();
+  state = {...state, ...JSON.parse(inp), v: 4, project: {...meta, id: p.id, co: STORE.co()}, dirty: false}; save();
   ['trimX', 'trimY', 'kerf', 'effort'].forEach(k => { $('#' + k).value = state[k]; });
   $('#proj-dlg').close(); clearResults(); showUnit(); renderPanels(); renderStocks(); showProject();
   if (plan && job) {

@@ -9,7 +9,7 @@
 function optimise(job, progress){
   const kerf = Math.max(0, +job.kerf || 0), tr = Math.max(0, +job.trim || 0);
   const trimX = Math.max(0, job.trimX === undefined || job.trimX === '' ? tr : +job.trimX || 0), trimY = Math.max(0, job.trimY === undefined || job.trimY === '' ? tr : +job.trimY || 0);
-  const t0 = Date.now(), limit = Math.max(200, +job.timeLimit || 3000);
+  const t0 = Date.now(), limitSet = Math.max(200, +job.timeLimit || 3000);
   const EPS = 1e-6;
 
   // panel types: packed at the cut size (finished size + grinding allowance), shown at the finished size (dw x dh)
@@ -33,6 +33,47 @@ function optimise(job, progress){
   const unfit = types.filter(t => !stocks.some(s => fitsStock(t, s)));
   const live = types.filter(t => !unfit.includes(t));
   const minDim = live.length ? Math.min(...live.map(t => Math.min(t.w, t.h))) : 0;
+
+  /* The least sheet area any plan can use (all panels placed): every panel takes its area plus a kerf along two sides,
+     every sheet gives its usable area plus a kerf (no cut at its edges); the cheapest mix of stock sizes (within their
+     quantities) whose usable area covers the panels. No plan can beat it, so a plan that reaches it is the best there is. */
+  let LB_N = 0;   // the sheets in that cheapest mix (0 = not worked out)
+  const LB = (() => {
+    if (!live.length || !stocks.length) return 0;
+    const need = live.reduce((a, t) => a + t.qty * (t.w + kerf) * (t.h + kerf), 0);
+    const st = stocks.map(s => ({A: s.w * s.h, U: (s.W + kerf) * (s.H + kerf), q: s.qty})).sort((a, b) => a.A / a.U - b.A / b.U);
+    let best = Infinity, bestN = 0, budget = 200000;
+    // depth-first over how many sheets of each stock size (the most efficient first)
+    const go = (i, area, cover, n0) => {
+      if (--budget < 0 || area >= best) return;
+      if (cover >= need - EPS) { best = area; bestN = n0; return; }
+      if (i >= st.length) return;
+      const s = st[i], top = Math.min(s.q, Math.ceil((need - cover - EPS) / s.U));
+      for (let n = top; n >= 0; n--) go(i + 1, area + n * s.A, cover + n * s.U, n0 + n);
+    };
+    go(0, 0, 0, 0);
+    if (budget < 0 || !isFinite(best)) {   // fallback: the area at the best ratios (still a bound, not whole sheets)
+      let left = need, a = 0;
+      for (const s of st) { const u = Math.min(left, s.q * s.U); a += u * s.A / s.U; left -= u; if (left <= EPS) break; }
+      return a;
+    }
+    LB_N = bestN;
+    return best;
+  })();
+  /* Auto: the search stops by itself, when the plan reaches the bound above (nothing can beat it) or when it has gone
+     without a plan on fewer sheets (or with fewer panels left over) for AUTO_F times as long as it took to find the last
+     one (at least AUTO_G; twice that while panels are left over) and AUTO_R plans tried, and AUTO_G2 since any better plan
+     (a tidier remnant on the same sheets); never before the minimum time, never after the maximum. Both grow with the
+     job: panel sizes × stock sizes, plus the number of panels. Tuned on 13 real work orders and 3 made-up jobs. */
+  const AUTO = !!job.auto;
+  const AUTO_F = job.autoF ?? 2, AUTO_G = job.autoG ?? 3000, AUTO_G2 = job.autoG2 ?? 2000;   // G2: the wait after a better plan on the same sheets (a tidier remnant)
+  const nPcs = live.reduce((a, t) => a + t.qty, 0), cx = live.length * Math.max(1, stocks.length) + nPcs / 100;
+  const AUTO_MIN = job.autoMin ?? Math.round(Math.min(job.autoMinCap ?? 60000, 2000 + (job.autoMinB ?? 300) * cx));
+  const AUTO_R = job.autoR ?? 40;   // and at least this many plans tried since the last one with fewer sheets
+  const AUTO_MAX = Math.max(AUTO_MIN, job.autoMax ?? Math.round(Math.min(300000, 15000 + 1000 * cx)));
+  const limit = AUTO ? AUTO_MAX : limitSet;
+  const nominal = AUTO ? Math.min(limit, Math.max(AUTO_MIN, 30000)) : limit;   // the strip-packer test and the first pass are timed on this
+  let stopReason = '';
 
   const SCORE = {
     baf: (fr, pw, ph) => fr.w * fr.h - pw * ph,
@@ -364,14 +405,29 @@ function optimise(job, progress){
   for (const dir of ['h', 'v']) for (const score of ['eff', 'val', 'dp']) STRIPS.push([{mode: 'strip', dir, score}, null]);
 
   // the best plan so far goes out with the progress (at most once a second) so the page can stop early and keep it
-  let bestRun = null, bestStrat = null, runs = 0, improvedAt = 0, dirty = false, lastSnap = 0;
+  let bestRun = null, bestStrat = null, runs = 0, improvedAt = 0, sheetsAt = 0, sheetsRuns = 0, dirty = false, lastSnap = 0;
+  const atBound = () => bestRun && !bestRun.key[0] && bestRun.key[1] <= LB * (1 + 1e-9) + EPS;
+  // when Auto would stop if nothing better turns up
+  const stopAt = () => !AUTO ? limit : Math.min(limit, atBound() ? improvedAt + 1000
+    : Math.max(AUTO_MIN, sheetsAt + (bestRun && bestRun.key[0] ? 2 : 1) * Math.max(AUTO_G, AUTO_F * sheetsAt), improvedAt + AUTO_G2));   // panels still left over: wait twice as long
+  const report = o => progress({...o, lb: LB, lbSheets: LB_N, cap: limit, auto: AUTO, stopAt: stopAt()});
+  const over = () => {
+    const t = Date.now() - t0;
+    if (t >= limit) { stopReason = AUTO ? 'cap' : 'time'; return true; }
+    if (AUTO && bestRun && t >= stopAt() && (atBound() || runs - sheetsRuns >= AUTO_R)) { stopReason = atBound() ? 'best' : 'settled'; return true; }
+    return false;
+  };
   const consider = (r, st) => {
     if (!r) return;
     runs++;
-    if (!bestRun || better(r.key, bestRun.key)) { bestRun = r; bestStrat = st; improvedAt = Date.now() - t0; dirty = true; }
+    if (!bestRun || better(r.key, bestRun.key)) {
+      if (!bestRun || r.key[0] !== bestRun.key[0] || Math.abs(r.key[1] - bestRun.key[1]) > EPS) { sheetsAt = Date.now() - t0; sheetsRuns = runs; }   // fewer panels left or less sheet area
+      bestRun = r; bestStrat = st; improvedAt = Date.now() - t0; dirty = true;
+      if (job.trace) job.trace.push([improvedAt, ...r.key]);
+    }
     if (progress && dirty && (lastSnap === 0 || Date.now() - lastSnap >= 1000)) {
       dirty = false; lastSnap = Date.now();
-      progress({runs, best: bestRun.key, improvedAt, snapshot: result()});
+      report({runs, best: bestRun.key, improvedAt, snapshot: result()});
     }
   };
   if (live.length) {
@@ -380,13 +436,13 @@ function optimise(job, progress){
     consider(run(null, null, ordered), {mode: 'mix', of: ordered.length});
     // the strip packers are slow on jobs with very many sizes: if a plan with them does not finish in 40% of the time, they are left out
     let useStrips = true;
-    { const r = run(null, null, ordered.concat(STRIPS), t0 + limit * 0.4); if (r) consider(r, {mode: 'mix', of: ordered.length + STRIPS.length}); else useStrips = false; }
+    { const r = run(null, null, ordered.concat(STRIPS), t0 + nominal * 0.4); if (r) consider(r, {mode: 'mix', of: ordered.length + STRIPS.length}); else useStrips = false; }
     const noStrip = tries => useStrips ? tries : tries.filter(([st]) => st.mode !== 'strip');
-    if (progress) progress({runs, best: bestRun.key, improvedAt});
+    if (progress) report({runs, best: bestRun.key, improvedAt});
     for (const st of strategies) {
       consider(run(st, live.slice().sort(SORTS[st.sort]), null, bestRun ? t0 + limit : 0), st);
-      if (progress && runs % 6 === 0) progress({runs, best: bestRun.key, improvedAt});
-      if (Date.now() - t0 > limit * 0.8) break;
+      if (progress && runs % 6 === 0) report({runs, best: bestRun.key, improvedAt});
+      if (Date.now() - t0 > nominal * 0.8 || over()) break;
     }
     // randomised panel orders until the time runs out
     let seed = 12345;
@@ -416,7 +472,7 @@ function optimise(job, progress){
       for (const p of r.patterns) for (const q of p.placed) { const t = types[q.t]; sum[q.t] += p.count * t.w * t.h / Math.pow(Math.max(p.yield, 0.05), SVC_EXP); n[q.t] += p.count; }
       types.forEach(t => { if (n[t.id]) vals[t.id] = (1 - SVC_G) * vals[t.id] + SVC_G * sum[t.id] / n[t.id] * (1 + (rnd() - 0.5) * SVC_NOISE); });
       valGen++;
-      if (progress && runs % 3 === 0) progress({runs, best: bestRun.key, improvedAt});
+      if (progress && runs % 3 === 0) report({runs, best: bestRun.key, improvedAt});
     };
     /* repack: take the least-used sheet of the best plan and a few others, and pack their pieces again on their own
        (value-corrected passes on the small job), so the glass moves onto the fuller sheets and the last one empties. */
@@ -467,7 +523,7 @@ function optimise(job, progress){
     const DRAIN_P = job.drainP ?? 1, DRAIN_T = job.drainT ?? 0.002, maxStock = Math.max(...stocks.map(s => s.w * s.h));
     let D = null;   // the drain's working plan, kept between turns while it is still built on the best plan
     const drain = () => {
-      const end = Math.min(t0 + limit, Date.now() + Math.max(200, limit * 0.04));
+      const end = Math.min(t0 + limit, Date.now() + Math.max(200, Math.min(AUTO ? 1500 : Infinity, stopAt() * 0.04)));
       if (!D || D.base !== bestRun) {
         const sheets = [];
         bestRun.patterns.forEach(p => {
@@ -522,7 +578,7 @@ function optimise(job, progress){
         }
         const newPool = areaOf(rest), newSq = out.reduce((a, o) => a + o.p.area * o.p.area, 0);
         // annealing: early on a slightly worse spread is taken now and then (to get out of a dead end), less so as time runs out
-        const temp = DRAIN_T * Math.pow(Math.max(0, 1 - (Date.now() - t0) / limit), 2), d = (newSq - oldSq) / (maxStock * maxStock);
+        const temp = DRAIN_T * Math.pow(Math.max(0, 1 - (Date.now() - t0) / stopAt()), 2), d = (newSq - oldSq) / (maxStock * maxStock);
         const ok = newPool < oldPool - EPS || (newPool <= oldPool + EPS && (newSq > oldSq * (1 + 1e-9) || (newSq >= oldSq * (1 - 1e-9) && rnd() < 0.3) || (temp > 0 && rnd() < Math.exp(d / temp))));
         if (!ok) continue;
         for (const j of pick.slice().sort((a, b) => b - a)) sheets.splice(j, 1);
@@ -546,7 +602,7 @@ function optimise(job, progress){
       if (bestRun === r) D.base = r;
     };
     let turn = 0;
-    while (Date.now() - t0 < limit) {
+    while (!over()) {
       // the drain pays off on jobs of mostly one-off sheets (many sizes, few of each); where patterns repeat, value
       // correction and repack do better and the drain would only break the repeats up
       const sheetsN = bestRun ? bestRun.patterns.reduce((a, p) => a + p.count, 0) : 0;
@@ -556,7 +612,7 @@ function optimise(job, progress){
       if (turn++ % 8 === 7) {
         const base = ordered.filter(() => rnd() < 0.5), extra = Array.from({length: 4 + Math.floor(rnd() * 8)}, () => [randStrat(), shuffled()]);
         consider(run(null, null, base.concat(extra), t0 + limit), {mode: 'mix', of: base.length + extra.length, random: extra.length});
-        if (progress && runs % 10 === 0) progress({runs, best: bestRun.key, improvedAt});
+        if (progress && runs % 10 === 0) report({runs, best: bestRun.key, improvedAt});
         continue;
       }
       const lead = bestStrat && bestStrat.fit ? bestStrat : null;   // the mix has no fit/split of its own
@@ -564,7 +620,7 @@ function optimise(job, progress){
         split: lead && rnd() < 0.5 ? lead.split : splits[Math.floor(rnd() * 4)]};
       const noise = 0.1 + rnd() * 0.5, keyOf = new Map(live.map(t => [t.id, t.w * t.h * (1 + (rnd() - 0.5) * noise)]));
       consider(run(st, live.slice().sort((a, b) => keyOf.get(b.id) - keyOf.get(a.id))), st);
-      if (progress && runs % 10 === 0) progress({runs, best: bestRun.key, improvedAt});
+      if (progress && runs % 10 === 0) report({runs, best: bestRun.key, improvedAt});
     }
   }
 
@@ -637,7 +693,8 @@ function optimise(job, progress){
   unfit.forEach(t => unplaced.push({t: t.id, qty: t.qty, reason: 'too big for the sheets'}));
   if (bestRun) bestRun.rem.forEach((q, i) => { if (q > 0 && !unfit.includes(types[i])) unplaced.push({t: i, qty: q, reason: 'not enough sheets'}); });
   return {types: types.map(({rows, ...t}) => ({...t, marks: rows.map(r => r.mark).filter((m, i, a) => m && a.indexOf(m) === i)})),
-    patterns, unplaced, trimX, trimY, kerf, runs, ms: Date.now() - t0, improvedAt, strategy: bestStrat};
+    patterns, unplaced, trimX, trimY, kerf, runs, ms: Date.now() - t0, improvedAt, strategy: bestStrat,
+    lb: LB, lbSheets: LB_N, auto: AUTO, cap: limit, stopReason};
   }
 }
 if (typeof module !== 'undefined') module.exports = {optimise};
