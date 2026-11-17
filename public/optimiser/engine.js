@@ -452,6 +452,54 @@ function optimise(job, progress){
 
   return result();
 
+  /* Re-plan the cuts of a finished layout (the panels stay where they are): the packers cut in the order they filled
+     the sheet, which can split one leftover into several (a full-width cut through the offcut beside the last column).
+     Here every region is split by a cut that peels off its first or last block, across or along, whichever leaves the
+     biggest whole offcuts (sum of squared offcut areas; then fewer cuts). Returns null when it gives up (too many regions). */
+  function recut(placed, W, H){
+    const memo = new Map(); let budget = 30000;
+    const sq = r => (r.w * r.h) * (r.w * r.h);
+    function solve(x, y, w, h, ps){
+      const key = x + ',' + y + ',' + w + ',' + h, hit = memo.get(key); if (hit) return hit;
+      if (--budget < 0) throw new Error('budget');
+      let best = null;
+      if (!ps.length) best = {s: sq({w, h}), n: 0, cuts: [], offs: [{x, y, w, h}]};
+      else if (ps.length === 1 && Math.abs(ps[0].w - w) <= EPS && Math.abs(ps[0].h - h) <= EPS) best = {s: 0, n: 0, cuts: [], offs: []};
+      else {
+        for (const ax of [0, 1]) {
+          const R0 = ax ? y : x, R1 = R0 + (ax ? h : w), st = p => ax ? p.y : p.x, en = p => ax ? p.y + p.h : p.x + p.w;
+          // blocks of panels no cut can pass between (closer than a kerf)
+          const iv = [];
+          for (const p of [...ps].sort((a, b) => st(a) - st(b))) {
+            const l = iv[iv.length - 1];
+            if (l && st(p) < l[1] + kerf - EPS) l[1] = Math.max(l[1], en(p)); else iv.push([st(p), en(p)]);
+          }
+          // options [cut position, end of the first part, start of the second]: an empty margin before the first block,
+          // or the cut after the first block / after the last block (peel from either end)
+          const opts = [];
+          if (iv[0][0] - R0 >= kerf + EPS) opts.push([iv[0][0] - kerf / 2, iv[0][0] - kerf, iv[0][0]]);
+          for (const i of new Set([0, iv.length - 1])) {
+            const e = iv[i][1]; if (R1 - e <= EPS) continue;
+            const cons = Math.min(kerf, R1 - e); opts.push([e + cons / 2, e, e + cons]);
+          }
+          for (const [c, a, b] of opts) {
+            const L = ax ? solve(x, y, w, a - y, ps.filter(p => p.y < a - EPS)) : solve(x, y, a - x, h, ps.filter(p => p.x < a - EPS));
+            const Rr = ax ? solve(x, b, w, y + h - b, ps.filter(p => p.y >= b - EPS)) : solve(b, y, x + w - b, h, ps.filter(p => p.x >= b - EPS));
+            const s = L.s + Rr.s, n = L.n + Rr.n + 1;
+            if (!best || s > best.s * (1 + 1e-9) || (s >= best.s * (1 - 1e-9) && n < best.n))
+              best = {s, n, cut: ax ? [x, c, x + w, c] : [c, y, c, y + h], L, R: Rr};
+          }
+        }
+        if (best) best = {s: best.s, n: best.n, cuts: [best.cut, ...best.L.cuts, ...best.R.cuts], offs: best.L.offs.concat(best.R.offs)};
+        else if (ps.length === 1) best = {s: 0, n: 0, cuts: [], offs: []};   // only a sliver thinner than a kerf beside it
+        else throw new Error('not guillotine');
+      }
+      memo.set(key, best);
+      return best;
+    }
+    try { const r = solve(0, 0, W, H, placed); return {cuts: r.cuts, offcuts: r.offs}; } catch (e) { return null; }
+  }
+
   // result: patterns with the marks they carry (rows are handed out in order across the sheets)
   function result(){
   const queue = types.map(t => t.rows.map(r => ({...r})));
@@ -462,9 +510,10 @@ function optimise(job, progress){
       const m = takeMark(pl.t), mm = marks.get(pl.t) || new Map(); mm.set(m, (mm.get(m) || 0) + 1); marks.set(pl.t, mm);
     }
     const s = stocks.find(x => x.i === p.stock);
-    const offcuts = p.free.concat(p.scrap || []).filter(r => r.w > EPS && r.h > EPS).sort((a, b) => b.w * b.h - a.w * a.h);   // every leftover piece
+    const rc = recut(p.placed, s.W, s.H);
+    const offcuts = (rc ? rc.offcuts : p.free.concat(p.scrap || [])).filter(r => r.w > EPS && r.h > EPS).sort((a, b) => b.w * b.h - a.w * a.h);   // every leftover piece
     return {no: n + 1, stock: p.stock, sheetW: s.w, sheetH: s.h, count: p.count, area: p.area, yield: p.area / (s.w * s.h),
-      placed: p.placed, offcuts, cuts: p.cuts || [], marks: [...marks].map(([t, mm]) => ({t, marks: [...mm].map(([mark, pcs]) => ({mark, pcs}))}))};
+      placed: p.placed, offcuts, cuts: rc ? rc.cuts : p.cuts || [], marks: [...marks].map(([t, mm]) => ({t, marks: [...mm].map(([mark, pcs]) => ({mark, pcs}))}))};
   });
   const unplaced = [];
   unfit.forEach(t => unplaced.push({t: t.id, qty: t.qty, reason: 'too big for the sheets'}));
