@@ -46,9 +46,12 @@ function optimise(job, progress){
     minas: (fr, cw, ch) => cw * (fr.h - ch) > (fr.w - cw) * ch,
     maxas: (fr, cw, ch) => cw * (fr.h - ch) <= (fr.w - cw) * ch,
   };
-  const GLOBAL_CAP = 60, STRIP_CAP = 120;
+  const GLOBAL_CAP = job.globalCap || 60, STRIP_CAP = job.stripCap || 120;
+  const REFILL = job.refill === false ? null : {mode: 'global', fit: job.refillFit || 'baf', split: job.refillSplit || 'minas'};
+  const BY_AREA = live.slice().sort((a, b) => b.w * b.h - a.w * a.h);
   let VAL = null, valGen = 0;   // piece values during a value-correction pass (null = plain area), and their version
   const stripMemo = new Map();
+  let KNAP = new Uint8Array(0);   // the strip knapsack's choice table, reused
   /* Strip packer (as glass optimisers like Optima do): the sheet is cut into strips across its whole length; each strip
      is filled along its length with columns (best combination by a knapsack over the length); each column is a stack
      of pieces no wider than the column, the first sets its width; a piece narrower than its column is trimmed with one
@@ -98,22 +101,38 @@ function optimise(job, progress){
       for (let guard = 0; guard < 20; guard++) {
         const len = L - x - (cols.length ? kerf : 0);
         if (len < minDim - EPS) break;
-        const byW = new Map();
+        // candidate columns, each as often as its leader's quantity allows (a bounded knapsack: near-equal sizes only
+        // fill a strip exactly when each piece counts once); per width only as many as could fit, the best first
+        const cap = Math.floor(len + kerf + 1e-9), byW = new Map();
         for (const id of ids) {
           if (cnt[id] <= 0) continue;
           for (const o of O[id]) {
             if (o[1] > hs + EPS || o[0] > len + EPS) continue;
-            const c = column(id, o, hs, cnt.slice()), k = Math.ceil(c.cw + kerf - 1e-9), e = byW.get(k);
-            if (!e || c.v > e.c.v) byW.set(k, {c, id, o});
+            const c = column(id, o, hs, cnt.slice()), k = Math.ceil(c.cw + kerf - 1e-9);
+            let per = 0; for (const it of c.items) if (it.id === id) per++;
+            const copies = Math.min(Math.max(1, Math.floor(cnt[id] / per)), Math.floor(cap / k));
+            const e = byW.get(k) || []; e.push({c, id, o, m: copies}); byW.set(k, e);
           }
         }
         if (!byW.size) break;
-        const items = [...byW.entries()], cap = Math.floor(len + kerf + 1e-9), dp = new Float64Array(cap + 1), ch = new Int32Array(cap + 1).fill(-1);
-        for (let v = 1; v <= cap; v++) {
-          dp[v] = dp[v - 1];
-          for (let i = 0; i < items.length; i++) { const k = items[i][0]; if (k <= v && dp[v - k] + items[i][1].c.v > dp[v]) { dp[v] = dp[v - k] + items[i][1].c.v; ch[v] = i; } }
+        // per width at most as many columns as fit, the best first; m copies of a column go in as 1, 2, 4, ... (binary split)
+        const items = [];
+        for (const [k, e] of byW) {
+          e.sort((a, b) => b.c.v - a.c.v);
+          let room = Math.floor(cap / k);
+          for (const it of e) {
+            let m = Math.min(it.m, room); room -= m;
+            for (let c = 1; m > 0; c *= 2) { const q = Math.min(c, m); items.push([k * q, it, q]); m -= q; }
+            if (room <= 0) break;
+          }
         }
-        const pick = []; for (let v = cap; v > 0;) { if (ch[v] < 0) v--; else { pick.push(items[ch[v]][1]); v -= items[ch[v]][0]; } }
+        const n = items.length, dp = new Float64Array(cap + 1), W1 = cap + 1;
+        if (KNAP.length < n * W1) KNAP = new Uint8Array(n * W1 * 2); else KNAP.fill(0, 0, n * W1);
+        for (let i = 0; i < n; i++) {
+          const k = items[i][0], val = items[i][1].c.v * items[i][2], row = i * W1;
+          for (let v = cap; v >= k; v--) if (dp[v - k] + val > dp[v] + 1e-9) { dp[v] = dp[v - k] + val; KNAP[row + v] = 1; }
+        }
+        const pick = []; for (let i = n - 1, v = cap; i >= 0; i--) if (KNAP[i * W1 + v]) { for (let q = 0; q < items[i][2]; q++) pick.push(items[i][1]); v -= items[i][0]; }
         let added = 0;
         for (const p of pick.sort((a, b) => b.c.cw - a.c.cw)) {
           if (cnt[p.id] <= 0) continue;
@@ -206,14 +225,19 @@ function optimise(job, progress){
     const free = [], scrap = [];
     for (const f of F) { const r = T ? {x: f.y, y: f.x, w: f.h, h: f.w} : f; (r.w >= minDim - EPS && r.h >= minDim - EPS ? free : scrap).push(r); }
     const cnt = new Map(); for (const p of placed) cnt.set(p.t, (cnt.get(p.t) || 0) + 1);
+    // the gaps the strips leave (beside a narrower piece, above a column, the end of a strip) are filled with what is
+    // left, by the free-rectangle packer (deeper guillotine levels, as Optima does)
+    if (REFILL && free.length && rem.some(q => q > 0)) return packSheet(s, null, REFILL, BY_AREA, {free, placed, cnt, rem, cuts, scrap, area});
     return {placed, cnt, area, free, cuts, scrap};
   }
 
-  function packSheet(s, left, strat, order){
+  // init: carry on from a part-packed sheet {free, placed, cnt, rem, cuts, scrap, area} (its arrays are taken over)
+  function packSheet(s, left, strat, order, init){
     if (strat.mode === 'strip') return stripSheet(s, left, strat);
-    const free = [{x: 0, y: 0, w: s.W, h: s.H}], placed = [], cnt = new Map(), rem = left.slice(), cuts = [], scrap = [];
+    const free = init ? init.free : [{x: 0, y: 0, w: s.W, h: s.H}], placed = init ? init.placed : [], cnt = init ? init.cnt : new Map(),
+      rem = init ? init.rem : left.slice(), cuts = init ? init.cuts : [], scrap = init ? init.scrap : [];
     const score = SCORE[strat.fit], split = SPLIT[strat.split];
-    let area = 0;
+    let area = init ? init.area : 0;
     const best = cands => {
       let b = null;
       for (let fi = 0; fi < free.length; fi++) {
@@ -431,8 +455,97 @@ function optimise(job, progress){
         valGen++;
       }
     };
+    /* drain: improve the best plan two sheets at a time. The emptiest sheet (plus any panels not placed) and one other
+       sheet are packed again: the first as full as it can be, then the rest on the second. Kept when fewer panels are
+       left over or the emptiest sheet gets emptier (equal: kept now and then, to move on); a sheet that empties is
+       dropped. Each step is small, so thousands run in the time a full plan takes. */
+    const DRAIN_P = job.drainP ?? 1, DRAIN_T = job.drainT ?? 0.002, maxStock = Math.max(...stocks.map(s => s.w * s.h));
+    let D = null;   // the drain's working plan, kept between turns while it is still built on the best plan
+    const drain = () => {
+      const end = Math.min(t0 + limit, Date.now() + Math.max(200, limit * 0.04));
+      if (!D || D.base !== bestRun) {
+        const sheets = [];
+        bestRun.patterns.forEach(p => {
+          const si = stocks.findIndex(s => s.i === p.stock), cnt = new Map(); for (const q of p.placed) cnt.set(q.t, (cnt.get(q.t) || 0) + 1);
+          const pp = {...p, cnt}; for (let c = 0; c < p.count; c++) sheets.push({si, p: pp});
+        });
+        const sLeft = stocks.map(s => s.qty); for (const sh of sheets) sLeft[sh.si]--;
+        D = {base: bestRun, sheets, pool: bestRun.rem.slice(), sLeft};
+      }
+      const {sheets, pool, sLeft} = D;
+      if (!sheets.length) return;
+      const areaOf = cnts => cnts.reduce((a, q, i) => a + q * types[i].w * types[i].h, 0);
+      const ordAll = Object.keys(SORTS).map(k => live.slice().sort(SORTS[k]));
+      // the fullest sheet these panels give on stock si (the free-rectangle orders and the strip packers)
+      const fullest = (si, left) => {
+        let b = null;
+        const take = p => { if (p.placed.length && (!b || p.area > b.area + EPS)) b = p; };
+        for (const ord of ordAll) {
+          const sub = ord.filter(t => left[t.id] > 0); if (!sub.length) return null;
+          for (let i = 0; i < 3; i++) take(packSheet(stocks[si], left, {mode: 'order', fit: fits[Math.floor(rnd() * 3)], split: splits[Math.floor(rnd() * 4)]}, sub));
+        }
+        if (useStrips) for (const [st] of STRIPS) take(packSheet(stocks[si], left, st));
+        return b;
+      };
+      let changed = false;
+      while (Date.now() < end) {
+        const n = sheets.length, hasPool = pool.some(q => q > 0);
+        if (!n || (n < 2 && !hasPool)) break;
+        // one of the emptier sheets, and one or two others at random
+        const fill = sh => sh.p.area / (stocks[sh.si].w * stocks[sh.si].h);   // emptiest by how full it is (sizes may differ)
+        const asc = sheets.map((sh, i) => i).sort((a, b) => fill(sheets[a]) - fill(sheets[b]));
+        const pick = [asc[Math.floor(Math.pow(rnd(), 3) * n)]];
+        const k = Math.min(n, rnd() < 0.5 ? 2 : 3);
+        while (pick.length < k) { const j = Math.floor(rnd() * n); if (!pick.includes(j)) pick.push(j); }
+        const left = pool.slice(), avail = sLeft.slice();
+        for (const j of pick) { for (const [t, c] of sheets[j].p.cnt) left[t] += c; avail[sheets[j].si]++; }
+        const oldPool = areaOf(pool), oldSq = pick.reduce((a, j) => a + sheets[j].p.area * sheets[j].p.area, 0);
+        // the others' stocks first, packed as full as they go; the last sheet on the stock that takes the most
+        const slots = pick.slice(1).concat(pick[0]).map(j => sheets[j].si), out = [];
+        let rest = left;
+        for (let s = 0; s < slots.length && rest.some(q => q > 0); s++) {
+          let p = null, psi = -1;
+          const cands = s < slots.length - 1 ? [slots[s]] : stocks.map((x, i) => i);
+          for (const ci of cands) {
+            if (avail[ci] <= 0) continue;
+            const q = fullest(ci, rest); if (!q) continue;
+            if (!p || q.area > p.area + EPS || (Math.abs(q.area - p.area) <= EPS && stocks[ci].w * stocks[ci].h < stocks[psi].w * stocks[psi].h)) { p = q; psi = ci; }
+          }
+          if (!p) continue;
+          avail[psi]--; out.push({si: psi, p});
+          rest = rest.slice(); for (const [t, c] of p.cnt) rest[t] -= c;
+        }
+        const newPool = areaOf(rest), newSq = out.reduce((a, o) => a + o.p.area * o.p.area, 0);
+        // annealing: early on a slightly worse spread is taken now and then (to get out of a dead end), less so as time runs out
+        const temp = DRAIN_T * Math.pow(Math.max(0, 1 - (Date.now() - t0) / limit), 2), d = (newSq - oldSq) / (maxStock * maxStock);
+        const ok = newPool < oldPool - EPS || (newPool <= oldPool + EPS && (newSq > oldSq * (1 + 1e-9) || (newSq >= oldSq * (1 - 1e-9) && rnd() < 0.3) || (temp > 0 && rnd() < Math.exp(d / temp))));
+        if (!ok) continue;
+        for (const j of pick.slice().sort((a, b) => b - a)) sheets.splice(j, 1);
+        sheets.push(...out);
+        for (let i = 0; i < pool.length; i++) pool[i] = rest[i];
+        for (let i = 0; i < sLeft.length; i++) sLeft[i] = avail[i];
+        changed = true;
+      }
+      if (!changed) return;
+      // back to patterns: identical sheets are one pattern repeated
+      const pats = new Map();
+      for (const sh of sheets) {
+        const key = sh.si + '|' + sh.p.placed.map(q => `${q.t},${q.x},${q.y},${q.r ? 1 : 0}`).join(';');
+        const e = pats.get(key);
+        if (e) e.count++;
+        else pats.set(key, {stock: stocks[sh.si].i, count: 1, yield: sh.p.area / (stocks[sh.si].w * stocks[sh.si].h), placed: sh.p.placed, free: sh.p.free, scrap: sh.p.scrap, cuts: sh.p.cuts, area: sh.p.area});
+      }
+      const patterns = [...pats.values()].sort((a, b) => b.yield - a.yield);
+      const r = {patterns, rem: pool.slice(), key: keyOf(patterns, pool)};
+      consider(r, {mode: 'drain'});
+      if (bestRun === r) D.base = r;
+    };
     let turn = 0;
     while (Date.now() - t0 < limit) {
+      // the drain pays off on jobs of mostly one-off sheets (many sizes, few of each); where patterns repeat, value
+      // correction and repack do better and the drain would only break the repeats up
+      const sheetsN = bestRun ? bestRun.patterns.reduce((a, p) => a + p.count, 0) : 0;
+      if (bestRun && sheetsN <= 1.5 * bestRun.patterns.length && rnd() < DRAIN_P) { drain(); continue; }
       if (bestRun && rnd() < REPACK_P) { repack(); continue; }
       if (turn % 4 !== 3) { turn++; svc(); continue; }
       if (turn++ % 8 === 7) {
