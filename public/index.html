@@ -644,6 +644,7 @@ function subscribeAll(){
   fb.onSnapshot(colRef('orders'), snap=>{
     state.orders = snap.docs.map(d=>({id:d.id, ...d.data()}));
     state.ready = true;
+    if(bulkImporting) return;   // a bulk import redraws once at the end, not after every saved order
     render();
   }, err=>{
     // Never show an empty ledger when loading failed: it looks like the data is gone.
@@ -1568,23 +1569,68 @@ function openBulkPreviewModal(parsed){
       </div>
     </div>`;
   document.body.appendChild(overlay);
-  overlay.addEventListener('click', e=>{ if(e.target===overlay) overlay.remove(); });
+  overlay.addEventListener('click', e=>{ if(e.target===overlay && !bulkImporting) overlay.remove(); });
   overlay.querySelector('#bulk-cancel').addEventListener('click', ()=>overlay.remove());
   overlay.querySelector('#bulk-confirm').addEventListener('click', async ()=>{
-    const btn = overlay.querySelector('#bulk-confirm');
-    btn.textContent = 'Importing…'; btn.disabled = true;
-    await performBulkImport(parsed);
-    overlay.remove();
+    const total = parsed.valid.length;
+    const modal = overlay.querySelector('.modal');
+    modal.innerHTML = `
+      <h2>Importing sale orders</h2>
+      <p style="color:var(--ink-soft);font-size:13px;margin:0 0 16px;">Please keep this tab open until the import finishes.</p>
+      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px;">
+        <span id="imp-count" style="font-size:13px;color:var(--ink-soft);">Preparing…</span>
+        <span id="imp-pct" class="num" style="font-size:26px;font-weight:600;">0%</span>
+      </div>
+      <div role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="imp-bar" style="height:10px;border-radius:999px;background:var(--border-soft);overflow:hidden;">
+        <div id="imp-fill" style="height:100%;width:0;background:var(--accent);border-radius:999px;transition:width .2s ease;"></div>
+      </div>
+      <div id="imp-eta" style="font-size:12px;color:var(--ink-soft);margin-top:8px;min-height:16px;"></div>`;
+    const started = Date.now();
+    let failed = false;   // saves still in flight when one fails must not overwrite the error
+    const onProgress = done => {
+      if(failed) return;
+      const pct = total ? Math.floor(done / total * 100) : 100;
+      modal.querySelector('#imp-pct').textContent = pct + '%';
+      modal.querySelector('#imp-fill').style.width = pct + '%';
+      modal.querySelector('#imp-bar').setAttribute('aria-valuenow', pct);
+      modal.querySelector('#imp-count').textContent = `${done.toLocaleString('en-IN')} of ${total.toLocaleString('en-IN')} orders saved`;
+      const secs = done ? Math.round((Date.now() - started) / done * (total - done) / 1000) : 0;
+      modal.querySelector('#imp-eta').textContent = done && done < total ? (secs < 60 ? `About ${Math.max(secs, 1)} sec left` : `About ${Math.ceil(secs / 60)} min left`) : '';
+    };
+    try{
+      await performBulkImport(parsed, onProgress);
+      overlay.remove();
+    }catch(err){
+      console.error(err);
+      failed = true;
+      modal.querySelector('#imp-eta').innerHTML = `<span style="color:var(--negative);">Import stopped: ${escapeHtml(err.message || 'could not save')}. Orders already saved are kept; check the ledger before importing again.</span>`;
+      const foot = document.createElement('div'); foot.className = 'modal-foot';
+      foot.innerHTML = '<button class="btn">Close</button>';
+      foot.querySelector('button').addEventListener('click', ()=>overlay.remove());
+      modal.appendChild(foot);
+    }
   });
 }
 
-async function performBulkImport(parsed){
-  for(const code of parsed.newChannels){ await saveChannelName(code, code); }
-  for(const code of parsed.newReps){ await saveRepName(code, code); }
-  for(const month of parsed.newMonths){ await addMonthTab(month); }
-  for(const row of parsed.valid){ await saveOrder(row); }
-  showToast(`Imported ${parsed.valid.length} order${parsed.valid.length!==1?'s':''}`);
-  render();
+var bulkImporting = false;   // var: read by the orders listener, which can run before this line is reached
+async function performBulkImport(parsed, onProgress = ()=>{}){
+  bulkImporting = true;
+  let done = 0;
+  try{
+    for(const code of parsed.newChannels){ await saveChannelName(code, code); }
+    for(const code of parsed.newReps){ await saveRepName(code, code); }
+    for(const month of parsed.newMonths){ await addMonthTab(month); }
+    onProgress(0);
+    // Save a few orders at a time instead of one by one; the bar moves as each one is confirmed.
+    const CHUNK = 20;
+    for(let i = 0; i < parsed.valid.length; i += CHUNK){
+      await Promise.all(parsed.valid.slice(i, i + CHUNK).map(row => saveOrder(row).then(()=>onProgress(++done))));
+    }
+  }finally{
+    bulkImporting = false;
+    render();
+  }
+  showToast(`Imported ${done} order${done!==1?'s':''}`);
 }
 
 function buildTemplateWorkbook(){
