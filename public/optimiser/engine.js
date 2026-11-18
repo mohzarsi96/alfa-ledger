@@ -579,7 +579,10 @@ function optimise(job, progress){
         const newPool = areaOf(rest), newSq = out.reduce((a, o) => a + o.p.area * o.p.area, 0);
         // annealing: early on a slightly worse spread is taken now and then (to get out of a dead end), less so as time runs out
         const temp = DRAIN_T * Math.pow(Math.max(0, 1 - (Date.now() - t0) / stopAt()), 2), d = (newSq - oldSq) / (maxStock * maxStock);
-        const ok = newPool < oldPool - EPS || (newPool <= oldPool + EPS && (newSq > oldSq * (1 + 1e-9) || (newSq >= oldSq * (1 - 1e-9) && rnd() < 0.3) || (temp > 0 && rnd() < Math.exp(d / temp))));
+        // same panels left over: less sheet area always wins, more never (sizes may differ); same area: the spread decides
+        const oldStock = pick.reduce((a, j) => a + stocks[sheets[j].si].w * stocks[sheets[j].si].h, 0), newStock = out.reduce((a, o) => a + stocks[o.si].w * stocks[o.si].h, 0);
+        const ok = newPool < oldPool - EPS || (newPool <= oldPool + EPS && (newStock < oldStock - EPS || (newStock <= oldStock + EPS &&
+          (newSq > oldSq * (1 + 1e-9) || (newSq >= oldSq * (1 - 1e-9) && rnd() < 0.3) || (temp > 0 && rnd() < Math.exp(d / temp))))));
         if (!ok) continue;
         for (const j of pick.slice().sort((a, b) => b - a)) sheets.splice(j, 1);
         sheets.push(...out);
