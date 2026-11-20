@@ -136,6 +136,8 @@ html.embed header.top h1,html.embed #theme{display:none}
 :root[data-theme="dark"] .seg button.on{color:#0E1721}
 @media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .seg button.on{color:#0E1721}}
 td input.g{width:64px}
+#p-wrap td input[data-k=w],#p-wrap td input[data-k=h]{min-width:64px}
+#p-wrap td input[data-k=qty]{min-width:62px}
 .cut{display:block;font-size:11px;color:var(--ink-faint)}
 @media print{
   @page{size:A4 portrait;margin:10mm}
@@ -394,7 +396,7 @@ function renderPanels(){
     <td><input type="number" class="g" data-k="gy" value="${esc(p.gy)}" min="0" step="0.5" placeholder="0"></td>
     <td class="c"><input type="checkbox" data-k="lock" ${p.lock ? 'checked' : ''}></td>
     <td class="c"><button class="ghost" data-del title="Remove">✕</button></td></tr>`).join('');
-  $('#p-wrap').innerHTML = `<table><thead><tr><th class="n">#</th><th style="width:12%">Mark</th><th style="width:16%">Customer</th><th style="width:13%">Site</th><th>Width (${U()})</th><th>Height (${U()})</th><th>Qty</th>
+  $('#p-wrap').innerHTML = `<table><thead><tr><th class="n">#</th><th style="width:12%">Mark</th><th style="width:16%">Customer</th><th style="width:13%">Site</th><th style="width:${state.unit === 'in' ? 88 : 72}px">Width (${U()})</th><th style="width:${state.unit === 'in' ? 88 : 72}px">Height (${U()})</th><th style="width:66px">Qty</th>
     <th title="Grinding allowance added to the width, in mm">Grinder X (mm)</th><th title="Grinding allowance added to the height, in mm">Grinder Y (mm)</th>
     <th class="c" title="No rotation">Lock</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
   totals();
