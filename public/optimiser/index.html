@@ -223,7 +223,7 @@ td input.g{width:64px}
 <dialog id="paste-dlg">
   <div class="card-h"><h2>Paste panels</h2></div>
   <div class="card-b">
-    <p class="hint" style="margin-top:0">Copy rows from Excel and paste below. Columns: Mark, Customer, Width, Height, Qty, Lock (yes = no rotation), Grinder X (mm), Grinder Y (mm).
+    <p class="hint" style="margin-top:0">Copy rows from Excel and paste below. Columns: Mark, Customer, Site, Width, Height, Qty, Lock (yes = no rotation), Grinder X (mm), Grinder Y (mm).
       Width and height in the unit selected at the top (inches may be written 48 1/2 or 48.5). A header row is detected automatically; a header such as “Width (in)” or “Width (mm)” sets the unit.</p>
     <textarea id="paste-txt" placeholder="W1	1200	900	10		3	3&#10;W2	600	450	24	yes	0	0"></textarea>
     <label style="display:flex;gap:6px;align-items:center;margin-top:8px;font-size:13px"><input type="checkbox" id="paste-replace" checked> Replace the current panels</label>
@@ -241,6 +241,26 @@ td input.g{width:64px}
     <p class="hint" id="sv-err" style="margin:6px 0 0;color:var(--negative)"></p>
   </div>
   <div class="dlg-f"><button id="sv-cancel">Cancel</button><button id="sv-new">Save as new</button><button id="sv-ok" class="save">Save</button></div>
+</dialog>
+
+<dialog id="lbl-dlg">
+  <div class="card-h"><h2>Print labels</h2></div>
+  <div class="card-b">
+    <div class="field"><label for="lb-tpl">Label sheet (A4)</label><select id="lb-tpl"></select></div>
+    <div class="field"><label for="lb-cust">Customer</label><select id="lb-cust"></select></div>
+    <div class="row2">
+      <div class="field"><label for="lb-order">Order</label><select id="lb-order"><option value="cut">Cutting order (layout by layout)</option><option value="cust">By customer, site and mark</option></select></div>
+      <div class="field"><label for="lb-start">Start at label no. (part-used sheet)</label><input id="lb-start" type="number" min="1" step="1"></div>
+    </div>
+    <div class="row2">
+      <div class="field"><label for="lb-ox">Printer offset X (mm, + moves right)</label><input id="lb-ox" type="number" step="0.5"></div>
+      <div class="field"><label for="lb-oy">Printer offset Y (mm, + moves down)</label><input id="lb-oy" type="number" step="0.5"></div>
+    </div>
+    <label style="display:flex;gap:6px;align-items:center;font-size:13px"><input type="checkbox" id="lb-outline"> Draw label outlines (test print on plain paper)</label>
+    <p class="hint" id="lb-info" style="margin:10px 0 0"></p>
+    <p class="hint" style="margin:4px 0 0">One label per piece, with the panel's mark, customer and site. Sizes are finished sizes (as entered, without grinder). Print at 100% / "Actual size", no scaling.</p>
+  </div>
+  <div class="dlg-f"><button id="lb-cancel">Cancel</button><button id="lb-ok" class="save">Print labels</button></div>
 </dialog>
 
 <dialog id="proj-dlg" style="width:min(860px,calc(100vw - 32px))">
@@ -291,7 +311,7 @@ const DEFAULT_STOCKS = [
   {use: false, name: '', w: 3660, h: 2140, qty: ''},
   {use: false, name: '', w: 3300, h: 2100, qty: ''},
 ];
-const blankPanel = () => ({mark: '', cust: '', w: '', h: '', qty: '', lock: false, gx: '', gy: ''});
+const blankPanel = () => ({mark: '', cust: '', site: '', w: '', h: '', qty: '', lock: false, gx: '', gy: ''});
 let state = {unit: 'mm', panels: [blankPanel()], stocks: DEFAULT_STOCKS.map(s => ({...s})), trimX: 10, trimY: 10, kerf: 0, effort: 'auto', v: 4,
   project: null, dirty: false};   // project: the saved project on screen {id, co, name, customer, notes, savedAt, by, ...}; dirty: changed since saved/opened
 try {
@@ -343,6 +363,7 @@ function renderPanels(){
     <td class="idx">${i + 1}</td>
     <td><input type="text" data-k="mark" value="${esc(p.mark)}" placeholder="Mark"></td>
     <td><input type="text" data-k="cust" value="${esc(p.cust ?? '')}" placeholder="Customer"></td>
+    <td><input type="text" data-k="site" value="${esc(p.site ?? '')}" placeholder="Site"></td>
     <td><input type="text" inputmode="decimal" data-k="w" value="${esc(lenInput(p.w))}"></td>
     <td><input type="text" inputmode="decimal" data-k="h" value="${esc(lenInput(p.h))}"></td>
     <td><input type="number" data-k="qty" value="${esc(p.qty)}" min="0" step="1"></td>
@@ -350,7 +371,7 @@ function renderPanels(){
     <td><input type="number" class="g" data-k="gy" value="${esc(p.gy)}" min="0" step="0.5" placeholder="0"></td>
     <td class="c"><input type="checkbox" data-k="lock" ${p.lock ? 'checked' : ''}></td>
     <td class="c"><button class="ghost" data-del title="Remove">✕</button></td></tr>`).join('');
-  $('#p-wrap').innerHTML = `<table><thead><tr><th class="n">#</th><th style="width:15%">Mark</th><th style="width:18%">Customer</th><th>Width (${U()})</th><th>Height (${U()})</th><th>Qty</th>
+  $('#p-wrap').innerHTML = `<table><thead><tr><th class="n">#</th><th style="width:12%">Mark</th><th style="width:16%">Customer</th><th style="width:13%">Site</th><th>Width (${U()})</th><th>Height (${U()})</th><th>Qty</th>
     <th title="Grinding allowance added to the width, in mm">Grinder X (mm)</th><th title="Grinding allowance added to the height, in mm">Grinder Y (mm)</th>
     <th class="c" title="No rotation">Lock</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
   totals();
@@ -389,7 +410,7 @@ $('#p-wrap').addEventListener('keydown', e => {
 });
 function addPanelRow(){
   const last = state.panels[state.panels.length - 1] || {};
-  state.panels.push({...blankPanel(), cust: last.cust ?? '', gx: last.gx ?? '', gy: last.gy ?? ''});   // new rows keep the customer and grinder of the row above
+  state.panels.push({...blankPanel(), cust: last.cust ?? '', site: last.site ?? '', gx: last.gx ?? '', gy: last.gy ?? ''});   // new rows keep the customer, site and grinder of the row above
   renderPanels(); save();
   const inp = $(`#p-wrap tr[data-i="${state.panels.length - 1}"] input[data-k="mark"]`); inp.focus(); inp.scrollIntoView({block: 'nearest'});
 }
@@ -403,7 +424,7 @@ $('#p-clear').onclick = () => {
 const truthy = v => /^(y|yes|1|true|lock|locked|no rotation|x|✓)$/i.test(String(v ?? '').trim());
 const unitOf = (h, fallback) => /\(in|inch|″|"/.test(h) ? 'in' : /mm/.test(h) ? 'mm' : fallback;
 // rows of cells -> panels (mm). A header row is used when found; without one the columns are, in order:
-// [Mark], [Customer], Width, Height, Qty, Lock, Grinder X, Grinder Y (Mark / Customer when those cells are not a size)
+// [Mark], [Customer], [Site], Width, Height, Qty, Lock, Grinder X, Grinder Y (the leading cells that are not a size)
 function parseRows(rows){
   rows = rows.map(r => r.map(c => typeof c === 'number' ? c : String(c ?? '').trim())).filter(r => r.some(c => c !== ''));
   if (!rows.length) return [];
@@ -411,8 +432,8 @@ function parseRows(rows){
   const find = re => H.findIndex(c => re.test(c));
   let col = null, unit = state.unit;
   if (H.some(c => /width|^w\b|height|^h\b|length|qty|quantity|pcs/.test(c))) {
-    const cu = find(/cust|client|party|buyer/);
-    col = {cust: cu, mark: H.findIndex((c, i) => i !== cu && /mark|ref|name|item|label|code|desc/.test(c)), w: find(/width|^w\b/), h: find(/height|length|^h\b|^l\b/),
+    const cu = find(/cust|client|party|buyer/), si = find(/site|location/);
+    col = {cust: cu, site: si, mark: H.findIndex((c, i) => i !== cu && i !== si && /mark|ref|name|item|label|code|desc|sr/.test(c)), w: find(/width|^w\b/), h: find(/height|length|^h\b|^l\b/),
       qty: find(/qty|quantity|pcs|nos|count|no\.? of/), lock: find(/lock|rotat/),
       gx: find(/grind.*\bx\b|\bx\b.*grind|^gx/), gy: find(/grind.*\by\b|\by\b.*grind|^gy/)};
     const g = find(/grind/); if (col.gx < 0 && col.gy < 0 && g >= 0) col.gx = col.gy = g;   // one grinder column = both sides
@@ -423,21 +444,21 @@ function parseRows(rows){
     let c = col;
     if (!c) {
       const sz = v => isFinite(parseLen(v, unit));
-      const o = sz(r[0]) ? -1 : !sz(r[1]) && sz(r[2]) ? 1 : 0;   // -1: no mark; 1: mark and customer first
-      c = {mark: o >= 0 ? 0 : -1, cust: o === 1 ? 1 : -1, w: o + 1, h: o + 2, qty: o + 3, lock: o + 4, gx: o + 5, gy: o + 6};
+      let o = 0; while (o < 3 && !sz(r[o])) o++;   // leading cells that are not a size: mark, customer, site
+      c = {mark: o >= 1 ? 0 : -1, cust: o >= 2 ? 1 : -1, site: o >= 3 ? 2 : -1, w: o, h: o + 1, qty: o + 2, lock: o + 3, gx: o + 4, gy: o + 5};
     }
     const cell = i => i >= 0 && i < r.length ? r[i] : '';
-    const p = {mark: String(cell(c.mark)), cust: String(cell(c.cust)), w: parseLen(cell(c.w), unit), h: parseLen(cell(c.h), unit), qty: num(cell(c.qty)),
+    const p = {mark: String(cell(c.mark)), cust: String(cell(c.cust)), site: String(cell(c.site)), w: parseLen(cell(c.w), unit), h: parseLen(cell(c.h), unit), qty: num(cell(c.qty)),
       lock: truthy(cell(c.lock)), gx: num(cell(c.gx)), gy: num(cell(c.gy))};
     if (!(p.w > 0 && p.h > 0)) continue;
-    out.push({mark: p.mark, cust: p.cust, w: p.w, h: p.h, qty: p.qty > 0 ? Math.round(p.qty) : 1, lock: p.lock,
+    out.push({mark: p.mark, cust: p.cust, site: p.site, w: p.w, h: p.h, qty: p.qty > 0 ? Math.round(p.qty) : 1, lock: p.lock,
       gx: p.gx > 0 ? p.gx : '', gy: p.gy > 0 ? p.gy : ''});
   }
   return out;
 }
 function addParsed(list, replace){
   if (!list.length) { alert('No panels found. Each row needs a width and a height.'); return; }
-  const keep = replace ? [] : state.panels.filter(p => p.w !== '' || p.h !== '' || String(p.mark).trim() || String(p.cust ?? '').trim());
+  const keep = replace ? [] : state.panels.filter(p => p.w !== '' || p.h !== '' || String(p.mark).trim() || String(p.cust ?? '').trim() || String(p.site ?? '').trim());
   state.panels = keep.concat(list); renderPanels(); changed();
   setStatus(`${fmt(list.length)} rows imported (${fmt(list.reduce((a, p) => a + p.qty, 0))} pcs).`);
 }
@@ -459,11 +480,11 @@ $('#p-file').onchange = async e => {
 };
 $('#p-tpl').onclick = () => {
   const inch = state.unit === 'in', u = inch ? 'in' : 'mm';
-  const ws = XLSX.utils.aoa_to_sheet([['Mark', 'Customer', `Width (${u})`, `Height (${u})`, 'Qty', 'Lock', 'Grinder X (mm)', 'Grinder Y (mm)'],
-    inch ? ['W1', 'Customer A', '47 1/4', '35 7/16', 10, '', 3, 3] : ['W1', 'Customer A', 1200, 900, 10, '', 3, 3],
-    inch ? ['W2', 'Customer A', 23.625, '17 3/4', 24, 'yes', 0, 0] : ['W2', 'Customer A', 600, 450, 24, 'yes', 0, 0],
-    inch ? ['D1', 'Customer B', '31 1/2', '78 3/4', 6, '', 2, 2] : ['D1', 'Customer B', 800, 2000, 6, '', 2, 2]]);
-  ws['!cols'] = [{wch: 16}, {wch: 22}, {wch: 12}, {wch: 12}, {wch: 8}, {wch: 8}, {wch: 15}, {wch: 15}];
+  const ws = XLSX.utils.aoa_to_sheet([['Mark', 'Customer', 'Site', `Width (${u})`, `Height (${u})`, 'Qty', 'Lock', 'Grinder X (mm)', 'Grinder Y (mm)'],
+    inch ? ['W1', 'Customer A', 'Site 1', '47 1/4', '35 7/16', 10, '', 3, 3] : ['W1', 'Customer A', 'Site 1', 1200, 900, 10, '', 3, 3],
+    inch ? ['W2', 'Customer A', 'Site 1', 23.625, '17 3/4', 24, 'yes', 0, 0] : ['W2', 'Customer A', 'Site 1', 600, 450, 24, 'yes', 0, 0],
+    inch ? ['D1', 'Customer B', 'Site 2', '31 1/2', '78 3/4', 6, '', 2, 2] : ['D1', 'Customer B', 'Site 2', 800, 2000, 6, '', 2, 2]]);
+  ws['!cols'] = [{wch: 16}, {wch: 22}, {wch: 18}, {wch: 12}, {wch: 12}, {wch: 8}, {wch: 8}, {wch: 15}, {wch: 15}];
   const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'Panels'); XLSX.writeFile(wb, `glass-panels-template-${u}.xlsx`);
 };
 
@@ -507,7 +528,7 @@ const run = {t0: 0, snap: null, runs: 0};   // the search running now: start tim
 function buildJob(){
   const panels = [], bad = [];
   state.panels.forEach((p, i) => {
-    if (!String(p.mark).trim() && !String(p.cust ?? '').trim() && p.w === '' && p.h === '' && String(p.qty) === '') return;   // empty row
+    if (!String(p.mark).trim() && !String(p.cust ?? '').trim() && !String(p.site ?? '').trim() && p.w === '' && p.h === '' && String(p.qty) === '') return;   // empty row
     const okLen = v => typeof v === 'number' && v > 0, q = num(p.qty);
     const g = v => String(v ?? '').trim() === '' ? 0 : num(v);
     const gx = g(p.gx), gy = g(p.gy);
@@ -515,7 +536,7 @@ function buildJob(){
     if (!okLen(p.w)) errs.push('w'); if (!okLen(p.h)) errs.push('h'); if (!(q > 0) || q !== Math.round(q)) errs.push('qty');
     if (!(gx >= 0)) errs.push('gx'); if (!(gy >= 0)) errs.push('gy');
     if (errs.length) errs.forEach(k => bad.push([i, k]));
-    else panels.push({mark: String(p.mark).trim(), cust: String(p.cust ?? '').trim(), w: p.w, h: p.h, qty: q, lock: !!p.lock, gx, gy});
+    else panels.push({mark: String(p.mark).trim(), cust: String(p.cust ?? '').trim(), site: String(p.site ?? '').trim(), w: p.w, h: p.h, qty: q, lock: !!p.lock, gx, gy});
   });
   const stocks = state.stocks.filter(s => s.use && typeof s.w === 'number' && typeof s.h === 'number' && s.w > 0 && s.h > 0)
     .map(s => ({name: stockName(s), w: s.w, h: s.h, qty: s.qty === '' || s.qty == null ? '' : num(s.qty)}));
@@ -709,7 +730,7 @@ function renderResults(job, res, quiet){
   el.innerHTML = `
     <div class="res-h">
       <div><h2>Cutting plan${P ? ' · ' + esc(P.name) : ''}</h2><div class="hint">${P && P.customer ? esc(P.customer) + ' · ' : ''}${esc(when)} · sizes in ${state.unit === 'in' ? 'inches' : 'mm'} · trim X ${fmt(res.trimX)} / Y ${fmt(res.trimY)} mm · kerf ${fmt(res.kerf, res.kerf % 1 ? 1 : 0)} mm${anyGround ? ' · sizes shown are cut sizes, grinder included (finished sizes in the list)' : ''}</div></div>
-      <div class="tools no-print"><button id="r-save" class="save">Save project</button><button id="r-print">Print / PDF</button><button id="r-xlsx">Download Excel</button></div>
+      <div class="tools no-print"><button id="r-save" class="save">Save project</button><button id="r-print">Print / PDF</button><button id="r-labels">Print labels</button><button id="r-xlsx">Download Excel</button></div>
     </div>
     <div class="kpis">
       <div class="kpi hi"><div class="l">Sheets needed</div><div class="v">${fmt(S.sheets)}</div><div class="s">${S.per.map(e => `${fmt(e.count)} × ${esc(size(e.w, e.h))}`).join(' · ')}</div></div>
@@ -727,6 +748,7 @@ function renderResults(job, res, quiet){
         <table><thead><tr><th>Size</th><th class="n">Per sheet</th><th class="n">Total</th><th>${anyCust(res) ? 'Marks (customer)' : 'Marks'}</th></tr></thead><tbody>${patternRows(p, res)}</tbody></table>
       </article>`).join('')}</div>`;
   $('#r-print').onclick = () => window.print();
+  $('#r-labels').onclick = () => openLabels(job, res);
   $('#r-save').onclick = () => openSave();
   $('#r-xlsx').onclick = () => exportXlsx(job, res);
   if (!quiet) el.scrollIntoView({behavior: 'smooth', block: 'start'});
@@ -768,11 +790,116 @@ function exportXlsx(job, res){
   const ws4 = XLSX.utils.aoa_to_sheet(offs); ws4['!cols'] = [{wch: 8}, {wch: 8}, {wch: 13}, {wch: 13}, {wch: 10}, {wch: 10}, {wch: 12}];
   XLSX.utils.book_append_sheet(wb, ws4, 'Offcuts');
 
-  const pan = [['Mark', 'Customer', `Width (${u})`, `Height (${u})`, 'Qty', 'Lock', 'Grinder X (mm)', 'Grinder Y (mm)']];
-  job.panels.forEach(p => pan.push([p.mark, p.cust || '', u === 'in' ? inchText(p.w) : xlLen(p.w), u === 'in' ? inchText(p.h) : xlLen(p.h), p.qty, p.lock ? 'yes' : '', p.gx || '', p.gy || '']));
+  const pan = [['Mark', 'Customer', 'Site', `Width (${u})`, `Height (${u})`, 'Qty', 'Lock', 'Grinder X (mm)', 'Grinder Y (mm)']];
+  job.panels.forEach(p => pan.push([p.mark, p.cust || '', p.site || '', u === 'in' ? inchText(p.w) : xlLen(p.w), u === 'in' ? inchText(p.h) : xlLen(p.h), p.qty, p.lock ? 'yes' : '', p.gx || '', p.gy || '']));
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(pan), 'Panels');
   const pn = P ? P.name.replace(/[\\/:*?"<>|]+/g, ' ').trim().slice(0, 60) + '-' : '';
   XLSX.writeFile(wb, `cutting-plan-${pn}${new Date().toISOString().slice(0, 10)}.xlsx`);
+}
+
+// ---------- labels: one per piece, on standard A4 label sheets ----------
+// sizes in mm: label w x h, columns x rows, top / left margin, gaps between labels (the common 8-24 per sheet A4 layouts)
+const LABEL_TPLS = [
+  {n: 8,  cols: 2, rows: 4, w: 99.1, h: 67.7, top: 13.1,  left: 4.65, gx: 2.5, gy: 0, code: 'L7165'},
+  {n: 10, cols: 2, rows: 5, w: 99.1, h: 57,   top: 6,     left: 4.65, gx: 2.5, gy: 0, code: 'L7173'},
+  {n: 12, cols: 3, rows: 4, w: 63.5, h: 72,   top: 4.5,   left: 7.25, gx: 2.5, gy: 0, code: 'L7164'},
+  {n: 14, cols: 2, rows: 7, w: 99.1, h: 38.1, top: 15.15, left: 4.65, gx: 2.5, gy: 0, code: 'L7163'},
+  {n: 16, cols: 2, rows: 8, w: 99.1, h: 33.9, top: 12.9,  left: 4.65, gx: 2.5, gy: 0, code: 'L7162'},
+  {n: 18, cols: 3, rows: 6, w: 63.5, h: 46.6, top: 8.7,   left: 7.25, gx: 2.5, gy: 0, code: 'L7161'},
+  {n: 21, cols: 3, rows: 7, w: 63.5, h: 38.1, top: 15.15, left: 7.25, gx: 2.5, gy: 0, code: 'L7160'},
+  {n: 24, cols: 3, rows: 8, w: 63.5, h: 33.9, top: 12.9,  left: 7.25, gx: 2.5, gy: 0, code: 'L7159'},
+];
+const labelOpts = () => ({tpl: 21, order: 'cut', start: 1, ox: 0, oy: 0, outline: false, ...(state.labels || {})});
+// every piece of the plan in cutting order: layout, sheet number, panel row, piece n of the row's qty
+function labelList(job, res){
+  if (res.patterns.some(p => !p.rows)) return null;   // a plan saved before labels existed
+  const out = [], seen = new Map(), layouts = res.patterns.length;
+  let sheet = 0;
+  for (const p of res.patterns) p.rows.forEach(copy => {
+    sheet++;
+    // left to right, top to bottom on the sheet
+    const order = p.placed.map((r, i) => i).sort((a, b) => p.placed[a].y - p.placed[b].y || p.placed[a].x - p.placed[b].x);
+    for (const i of order) {
+      const row = copy[i], pn = job.panels[row]; if (!pn) continue;
+      const k = (seen.get(row) || 0) + 1; seen.set(row, k);
+      out.push({layout: p.no, layouts, sheet, row, k, qty: pn.qty, mark: pn.mark || '', cust: pn.cust || '', site: pn.site || '', w: pn.w, h: pn.h});
+    }
+  });
+  out.sheets = sheet;
+  return out;
+}
+let lblCtx = null;
+function openLabels(job, res){
+  const list = labelList(job, res);
+  if (!list) { alert('This plan was saved before labels were added. Press Optimise once and then print the labels.'); return; }
+  const o = labelOpts(), P = curProject();
+  lblCtx = {job, res, list};
+  $('#lb-tpl').innerHTML = LABEL_TPLS.map(t => `<option value="${t.n}">${t.n} per sheet · ${t.cols} × ${t.rows} · ${t.w} × ${t.h} mm (${t.code})</option>`).join('');
+  $('#lb-tpl').value = o.tpl;
+  const custs = [...new Set(list.map(l => l.cust))];
+  $('#lb-cust').innerHTML = `<option value="*">All customers</option>` + custs.map(c => `<option value="${esc(c)}">${c ? esc(c) : '(no customer)'}</option>`).join('');
+  $('#lb-order').value = o.order; $('#lb-start').value = o.start; $('#lb-ox').value = o.ox; $('#lb-oy').value = o.oy; $('#lb-outline').checked = !!o.outline;
+  labelInfo(); $('#lbl-dlg').showModal();
+}
+function labelForm(){
+  const t = LABEL_TPLS.find(x => x.n === +$('#lb-tpl').value) || LABEL_TPLS[6];
+  const start = Math.min(t.n, Math.max(1, Math.round(num($('#lb-start').value)) || 1));
+  return {t, start, cust: $('#lb-cust').value, order: $('#lb-order').value,
+    ox: num($('#lb-ox').value) || 0, oy: num($('#lb-oy').value) || 0, outline: $('#lb-outline').checked};
+}
+function labelPick(f){
+  let l = lblCtx.list.filter(x => f.cust === '*' || x.cust === f.cust);
+  if (f.order === 'cust') l = l.slice().sort((a, b) => a.cust.localeCompare(b.cust) || a.site.localeCompare(b.site) || a.row - b.row || a.k - b.k);
+  return l;
+}
+function labelInfo(){
+  const f = labelForm(), n = labelPick(f).length, pages = Math.ceil((n + f.start - 1) / f.t.n);
+  $('#lb-info').textContent = `${fmt(n)} labels on ${fmt(pages)} A4 sheet${pages === 1 ? '' : 's'} of ${f.t.n} (${f.t.w} × ${f.t.h} mm).`;
+}
+['#lb-tpl', '#lb-cust', '#lb-order', '#lb-start'].forEach(s => $(s).addEventListener('input', labelInfo));
+$('#lb-cancel').onclick = () => $('#lbl-dlg').close();
+$('#lb-ok').onclick = () => {
+  const f = labelForm();
+  state.labels = {tpl: f.t.n, order: f.order, start: f.start, ox: f.ox, oy: f.oy, outline: f.outline}; save();
+  $('#lbl-dlg').close(); printLabels(labelPick(f), f);
+};
+// the label sheets as a page of their own (A4, no margins, labels placed in mm), printed from a hidden frame
+function labelHtml(list, f){
+  const t = f.t, P = curProject(), u = state.unit === 'in' ? 'IN' : 'MM';
+  const lines = 6 + (P ? 1 : 0);   // Layout, Customer, Site, Mark, Size, Qty (+ Job)
+  const pad = Math.min(3, t.h * 0.07), fs = Math.min(4.2, (t.h - 2 * pad) / (lines * 1.28 + 0.6), t.w / 21);   // font size in mm
+  const slots = Array(f.start - 1).fill(null).concat(list), pages = [];
+  for (let i = 0; i < slots.length; i += t.n) pages.push(slots.slice(i, i + t.n));
+  const row = (k, v, big) => `<div class="r${big ? ' big' : ''}"><span class="k">${k}</span><span class="c">:</span><span class="v">${esc(v)}</span></div>`;
+  const label = l => l ? row('Layout', `${l.layout} / ${l.layouts}  ·  Sheet ${l.sheet} / ${lblCtx.list.sheets}`)
+    + (P ? row('Job', P.name) : '') + row('Customer', l.cust) + row('Site', l.site) + row('Mark', l.mark)
+    + row(`Size (${u})`, size(l.w, l.h), true) + row('Qty', `${l.k} / ${l.qty}`) : '';
+  return `<!doctype html><html><head><meta charset="utf-8"><title>Labels</title><style>
+    @page{size:A4 portrait;margin:0}
+    *{box-sizing:border-box}
+    html,body{margin:0;padding:0;background:#fff;color:#000}
+    body{font-family:Arial,Helvetica,sans-serif}
+    .pg{position:relative;width:210mm;height:297mm;overflow:hidden;break-after:page;page-break-after:always}
+    .pg:last-child{break-after:auto;page-break-after:auto}
+    .lb{position:absolute;width:${t.w}mm;height:${t.h}mm;padding:${pad}mm ${pad * 1.4}mm;display:flex;flex-direction:column;justify-content:center;overflow:hidden${f.outline ? ';outline:0.2mm dashed #888;outline-offset:-0.1mm' : ''}}
+    .r{display:flex;font-size:${fs}mm;line-height:1.28;white-space:nowrap}
+    .r{align-items:baseline}
+    .r .k{flex:0 0 ${fs * 5.1}mm}
+    .r .c{flex:0 0 ${fs * 0.8}mm}
+    .r .v{font-weight:700;overflow:hidden;text-overflow:ellipsis}
+    .r.big .v{font-size:1.2em}
+  </style></head><body>${pages.map(pg => `<div class="pg">${pg.map((l, i) => {
+    const c = i % t.cols, r = Math.floor(i / t.cols);
+    return `<div class="lb" style="left:${(t.left + c * (t.w + t.gx) + f.ox).toFixed(2)}mm;top:${(t.top + r * (t.h + t.gy) + f.oy).toFixed(2)}mm">${label(l)}</div>`;
+  }).join('')}</div>`).join('')}</body></html>`;
+}
+function printLabels(list, f){
+  let fr = $('#lbl-frame');
+  if (fr) fr.remove();
+  fr = document.createElement('iframe'); fr.id = 'lbl-frame';
+  fr.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden';
+  fr.onload = () => { try { fr.contentWindow.focus(); fr.contentWindow.print(); } catch (e) { alert('Could not open the print window: ' + e.message); } };
+  fr.srcdoc = labelHtml(list, f); document.body.appendChild(fr);
 }
 
 // ---------- projects: everything entered plus the cutting plan ----------
@@ -889,7 +1016,7 @@ $('#pj-list').addEventListener('click', async e => {
   }
   if (e.target.closest('[data-open]')) openProject(p);
 });
-const hasInput = () => state.panels.some(p => p.w !== '' || p.h !== '' || String(p.mark).trim() || String(p.cust ?? '').trim());
+const hasInput = () => state.panels.some(p => p.w !== '' || p.h !== '' || String(p.mark).trim() || String(p.cust ?? '').trim() || String(p.site ?? '').trim());
 async function openProject(p){
   if (worker) { alert('Stop the search first.'); return; }
   if (state.dirty && hasInput() && !confirm(`Open “${p.name}”? The panels and settings on screen${curProject() ? ' (changed since saved)' : ' (not saved)'} will be replaced.`)) return;

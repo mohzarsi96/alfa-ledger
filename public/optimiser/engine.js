@@ -680,21 +680,23 @@ function optimise(job, progress){
   // result: patterns with the marks they carry (rows are handed out in order across the sheets)
   function result(){
   const queue = types.map(t => t.rows.map(r => ({...r})));
-  const NONE = {mark: '', cust: ''};
+  const NONE = {mark: '', cust: '', row: -1};
   const takeMark = tid => { const q = queue[tid]; while (q.length && q[0].qty <= 0) q.shift(); if (!q.length) return NONE; q[0].qty--; return q[0]; };
   const patterns = (bestRun ? bestRun.patterns : []).map((p, n) => {
     const marks = new Map();   // type id -> Map(mark+customer -> {mark, cust, pcs}) over all the pattern's sheets
     const pieces = p.placed.map(() => undefined);   // per placed piece: {mark, cust} when every copy of the sheet has the same, else null
-    for (let c = 0; c < p.count; c++) p.placed.forEach((pl, i) => {
+    const rows = [];   // per copy of the sheet: the job.panels row of each placed piece (-1 = none), for labels
+    for (let c = 0; c < p.count; c++) rows.push(p.placed.map((pl, i) => {
       const r = takeMark(pl.t), k = r.mark + '\u0000' + r.cust, mm = marks.get(pl.t) || new Map();
       const e = mm.get(k) || {mark: r.mark, cust: r.cust, pcs: 0}; e.pcs++; mm.set(k, e); marks.set(pl.t, mm);
       const was = pieces[i]; pieces[i] = was === undefined ? {mark: r.mark, cust: r.cust} : was && was.mark === r.mark && was.cust === r.cust ? was : null;
-    });
+      return r.row ?? -1;
+    }));
     const s = stocks.find(x => x.i === p.stock);
     const rc = recut(p.placed, s.W, s.H);
     const offcuts = (rc ? rc.offcuts : p.free.concat(p.scrap || [])).filter(r => r.w > EPS && r.h > EPS).sort((a, b) => b.w * b.h - a.w * a.h);   // every leftover piece
     return {no: n + 1, stock: p.stock, sheetW: s.w, sheetH: s.h, count: p.count, area: p.area, yield: p.area / (s.w * s.h),
-      placed: p.placed, offcuts, cuts: rc ? rc.cuts : p.cuts || [], marks: [...marks].map(([t, mm]) => ({t, marks: [...mm.values()]})), pieces};
+      placed: p.placed, offcuts, cuts: rc ? rc.cuts : p.cuts || [], marks: [...marks].map(([t, mm]) => ({t, marks: [...mm.values()]})), pieces, rows};
   });
   const unplaced = [];
   unfit.forEach(t => unplaced.push({t: t.id, qty: t.qty, reason: 'too big for the sheets'}));
