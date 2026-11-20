@@ -183,7 +183,7 @@ td input.g{width:64px}
       <div class="tbl-wrap" id="p-wrap"></div>
       <div class="foot">
         <span><b id="p-rows">0</b> rows · <b id="p-pcs">0</b> pcs · <b id="p-sqm">0</b> <span id="p-au">SQM</span></span>
-        <span class="hint">Grinder X / Y (mm) is added to the width / height for cutting; drawings show the finished size. Lock = no rotation.</span>
+        <span class="hint">Grinder X / Y (mm) is added to the width / height for cutting; drawings show the cut size, width along the top edge and height up the side. Lock = no rotation.</span>
       </div>
     </section>
 
@@ -613,15 +613,32 @@ function sheetSvg(p, res){
     out.push(`<text class="dim" x="${ocx}" y="${ocy}" font-size="${ofs}" text-anchor="middle" dominant-baseline="middle"${vert ? ` transform="rotate(-90 ${ocx} ${ocy})"` : ''}>${esc(ot)}</text>`);
   }
   for (const r of p.placed) {
-    const c = colour(r.t), x = TX + r.x, y = TY + r.y, [fw, fh] = finished(r, res);
+    const c = colour(r.t), x = TX + r.x, y = TY + r.y;
     out.push(`<rect x="${x}" y="${y}" width="${r.w}" height="${r.h}" fill="${c.fill}" stroke="${c.stroke}" stroke-width="${W / 700}"/>`);
-    const label = `${size(fw, fh)}${r.r ? ' ↻' : ''}`, ll = label.length * 0.62;
+    const mk = (res.types[r.t].marks || []);
+    const mtxt = (mk.length === 1 ? mk[0] : mk.length > 1 ? mk[0] + ' +' + (mk.length - 1) : '');
+    const mshort = (mtxt.length > 16 ? mtxt.slice(0, 15) + '…' : mtxt) + (r.r ? (mtxt ? ' ↻' : '↻') : '');
+    // cut size (grinder included), each length written along its own edge: width along the top, height up the left side
+    const tw = len(r.w), th = len(r.h), lw2 = tw.length * 0.62, lh2 = th.length * 0.62;
+    // each label fits its edge; the two stay clear of each other in the top-left corner (one of them has to clear the other's band)
+    const fsE = Math.min(r.h / 4, r.w / 4, r.w * 0.9 / lw2, r.h * 0.9 / lh2, Math.max(r.w / (lw2 + 3.2), r.h / (lh2 + 3.2)), fsD * 1.4);
+    if (fsE >= fsD * 0.45) {
+      const ex = x + r.w / 2, ey = y + fsE * 0.75, hx = x + fsE * 0.75, hy = y + r.h / 2;
+      out.push(`<text x="${ex}" y="${ey}" font-size="${fsE}" font-weight="600" text-anchor="middle" dominant-baseline="middle">${esc(tw)}</text>`);
+      out.push(`<text x="${hx}" y="${hy}" font-size="${fsE}" font-weight="600" text-anchor="middle" dominant-baseline="middle" transform="rotate(-90 ${hx} ${hy})">${esc(th)}</text>`);
+      if (mshort) {   // mark (and ↻ when turned) in the space left inside the edge labels
+        const iw = r.w - fsE * 1.5, ih = r.h - fsE * 1.5, ml = mshort.length * 0.62;
+        const fm = Math.min(ih / 2.2, iw * 0.9 / ml, fsE * 1.1);
+        if (fm >= fsD * 0.4) out.push(`<text x="${x + fsE * 1.5 + iw / 2}" y="${y + fsE * 1.5 + ih / 2}" font-size="${fm}" text-anchor="middle" dominant-baseline="middle" opacity=".75">${esc(mshort)}</text>`);
+      }
+      continue;
+    }
+    // too small for edge labels: one centred "W × H" label as before
+    const label = `${size(r.w, r.h)}${r.r ? ' ↻' : ''}`, ll = label.length * 0.62;
     // horizontal label, or turned up the side of a tall narrow piece when that reads bigger
     const fsH = Math.min(r.h / 3.2, r.w * 0.92 / ll, fsD * 1.6), fsV = Math.min(r.w / 3.2, r.h * 0.92 / ll, fsD * 1.6);
     const vert = fsV > fsH * 1.15, fs = vert ? fsV : fsH, across = vert ? r.w : r.h;   // across = room for a second line
     if (fs >= fsD * 0.5) {
-      const mk = (res.types[r.t].marks || []);
-      const mtxt = mk.length === 1 ? mk[0] : mk.length > 1 ? mk[0] + ' +' + (mk.length - 1) : '';
       const two = mtxt && across > fs * 3;
       const cx = x + r.w / 2, cy = y + r.h / 2, tf = vert ? ` transform="rotate(-90 ${cx} ${cy})"` : '';
       out.push(`<g${tf}><text x="${cx}" y="${cy - (two ? fs * 0.55 : 0)}" font-size="${fs}" font-weight="600" text-anchor="middle" dominant-baseline="middle">${esc(label)}</text>`);
@@ -651,7 +668,7 @@ function patternRows(p, res){
   const marks = new Map(p.marks.map(m => [m.t, m.marks]));
   return groups(p, res).map(e => {
     const c = colour(e.t), g = ground(res.types[e.t]);
-    return `<tr><td><span class="sw" style="background:${c.fill};border-color:${c.stroke}"></span>${esc(size(e.f[0], e.f[1]))}${e.r ? ' ↻' : ''}${g ? `<span class="cut">cut ${esc(size(e.w, e.h))}</span>` : ''}</td><td class="n">${e.n}</td><td class="n">${fmt(e.n * p.count)}</td><td class="mk">${esc(markText(marks.get(e.t) || []))}</td></tr>`;
+    return `<tr><td><span class="sw" style="background:${c.fill};border-color:${c.stroke}"></span>${esc(size(e.w, e.h))}${e.r ? ' ↻' : ''}${g ? `<span class="cut">finished ${esc(size(e.f[0], e.f[1]))}</span>` : ''}</td><td class="n">${e.n}</td><td class="n">${fmt(e.n * p.count)}</td><td class="mk">${esc(markText(marks.get(e.t) || []))}</td></tr>`;
   }).join('');
 }
 
@@ -671,7 +688,7 @@ function renderResults(job, res, quiet){
   const when = new Date(lastWhen).toLocaleString('en-IN', {dateStyle: 'medium', timeStyle: 'short'}), P = curProject();
   el.innerHTML = `
     <div class="res-h">
-      <div><h2>Cutting plan${P ? ' · ' + esc(P.name) : ''}</h2><div class="hint">${P && P.customer ? esc(P.customer) + ' · ' : ''}${esc(when)} · sizes in ${state.unit === 'in' ? 'inches' : 'mm'} · trim X ${fmt(res.trimX)} / Y ${fmt(res.trimY)} mm · kerf ${fmt(res.kerf, res.kerf % 1 ? 1 : 0)} mm${anyGround ? ' · labels show finished sizes; pieces are cut with the grinder allowance' : ''}</div></div>
+      <div><h2>Cutting plan${P ? ' · ' + esc(P.name) : ''}</h2><div class="hint">${P && P.customer ? esc(P.customer) + ' · ' : ''}${esc(when)} · sizes in ${state.unit === 'in' ? 'inches' : 'mm'} · trim X ${fmt(res.trimX)} / Y ${fmt(res.trimY)} mm · kerf ${fmt(res.kerf, res.kerf % 1 ? 1 : 0)} mm${anyGround ? ' · sizes shown are cut sizes, grinder included (finished sizes in the list)' : ''}</div></div>
       <div class="tools no-print"><button id="r-save" class="save">Save project</button><button id="r-print">Print / PDF</button><button id="r-xlsx">Download Excel</button></div>
     </div>
     <div class="kpis">
