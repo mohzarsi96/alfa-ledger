@@ -1,7 +1,7 @@
 /* Glass sheet optimiser engine: guillotine 2D cutting (every cut runs edge to edge of the piece it splits).
    Runs in a Web Worker in the page (index.html embeds this file's text) and in Node for tests.
 
-   job = {panels:[{mark,w,h,qty,lock,gx,gy}] (mm; gx/gy = grinding allowance added to the width/height for cutting), stocks:[{name,w,h,qty (blank = unlimited)}], trimX / trimY (mm off each left-right / top-bottom edge; trim = both), kerf (mm per cut), timeLimit (ms)}
+   job = {panels:[{mark,cust,w,h,qty,lock,gx,gy}] (cust = customer name; mm; gx/gy = grinding allowance added to the width/height for cutting), stocks:[{name,w,h,qty (blank = unlimited)}], trimX / trimY (mm off each left-right / top-bottom edge; trim = both), kerf (mm per cut), timeLimit (ms)}
    Identical panels (same size; a rotatable w×h equals h×w) are merged into types. Each sheet is packed with a guillotine
    free-rectangle packer; the pattern is then repeated as often as the remaining quantities allow. Many strategies
    (panel order × fit rule × split rule, plus randomised orders until the time limit) are tried and the best plan kept:
@@ -21,7 +21,7 @@ function optimise(job, progress){
     const key = rot ? (w >= h ? `${w}x${h}|${dw}x${dh}` : `${h}x${w}|${dh}x${dw}`) : `${w}x${h}|${dw}x${dh}L`;
     let t = tmap.get(key);
     if (!t) { t = {id: types.length, w, h, dw, dh, rot, qty: 0, rows: []}; tmap.set(key, t); types.push(t); }
-    t.qty += q; t.rows.push({row, mark: String(p.mark || '').trim(), qty: q});
+    t.qty += q; t.rows.push({row, mark: String(p.mark || '').trim(), cust: String(p.cust || '').trim(), qty: q});
   });
   // stock sheets (usable area inside the edge trim)
   const stocks = [];
@@ -680,22 +680,27 @@ function optimise(job, progress){
   // result: patterns with the marks they carry (rows are handed out in order across the sheets)
   function result(){
   const queue = types.map(t => t.rows.map(r => ({...r})));
-  const takeMark = tid => { const q = queue[tid]; while (q.length && q[0].qty <= 0) q.shift(); if (!q.length) return ''; q[0].qty--; return q[0].mark; };
+  const NONE = {mark: '', cust: ''};
+  const takeMark = tid => { const q = queue[tid]; while (q.length && q[0].qty <= 0) q.shift(); if (!q.length) return NONE; q[0].qty--; return q[0]; };
   const patterns = (bestRun ? bestRun.patterns : []).map((p, n) => {
-    const marks = new Map();   // type id -> Map(mark -> pcs) over all the pattern's sheets
-    for (let c = 0; c < p.count; c++) for (const pl of p.placed) {
-      const m = takeMark(pl.t), mm = marks.get(pl.t) || new Map(); mm.set(m, (mm.get(m) || 0) + 1); marks.set(pl.t, mm);
-    }
+    const marks = new Map();   // type id -> Map(mark+customer -> {mark, cust, pcs}) over all the pattern's sheets
+    const pieces = p.placed.map(() => undefined);   // per placed piece: {mark, cust} when every copy of the sheet has the same, else null
+    for (let c = 0; c < p.count; c++) p.placed.forEach((pl, i) => {
+      const r = takeMark(pl.t), k = r.mark + '\u0000' + r.cust, mm = marks.get(pl.t) || new Map();
+      const e = mm.get(k) || {mark: r.mark, cust: r.cust, pcs: 0}; e.pcs++; mm.set(k, e); marks.set(pl.t, mm);
+      const was = pieces[i]; pieces[i] = was === undefined ? {mark: r.mark, cust: r.cust} : was && was.mark === r.mark && was.cust === r.cust ? was : null;
+    });
     const s = stocks.find(x => x.i === p.stock);
     const rc = recut(p.placed, s.W, s.H);
     const offcuts = (rc ? rc.offcuts : p.free.concat(p.scrap || [])).filter(r => r.w > EPS && r.h > EPS).sort((a, b) => b.w * b.h - a.w * a.h);   // every leftover piece
     return {no: n + 1, stock: p.stock, sheetW: s.w, sheetH: s.h, count: p.count, area: p.area, yield: p.area / (s.w * s.h),
-      placed: p.placed, offcuts, cuts: rc ? rc.cuts : p.cuts || [], marks: [...marks].map(([t, mm]) => ({t, marks: [...mm].map(([mark, pcs]) => ({mark, pcs}))}))};
+      placed: p.placed, offcuts, cuts: rc ? rc.cuts : p.cuts || [], marks: [...marks].map(([t, mm]) => ({t, marks: [...mm.values()]})), pieces};
   });
   const unplaced = [];
   unfit.forEach(t => unplaced.push({t: t.id, qty: t.qty, reason: 'too big for the sheets'}));
   if (bestRun) bestRun.rem.forEach((q, i) => { if (q > 0 && !unfit.includes(types[i])) unplaced.push({t: i, qty: q, reason: 'not enough sheets'}); });
-  return {types: types.map(({rows, ...t}) => ({...t, marks: rows.map(r => r.mark).filter((m, i, a) => m && a.indexOf(m) === i)})),
+  return {types: types.map(({rows, ...t}) => ({...t, marks: rows.map(r => r.mark).filter((m, i, a) => m && a.indexOf(m) === i),
+      custs: rows.map(r => r.cust).filter((m, i, a) => m && a.indexOf(m) === i)})),
     patterns, unplaced, trimX, trimY, kerf, runs, ms: Date.now() - t0, improvedAt, strategy: bestStrat,
     lb: LB, lbSheets: LB_N, auto: AUTO, cap: limit, stopReason};
   }

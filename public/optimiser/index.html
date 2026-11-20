@@ -222,7 +222,7 @@ td input.g{width:64px}
 <dialog id="paste-dlg">
   <div class="card-h"><h2>Paste panels</h2></div>
   <div class="card-b">
-    <p class="hint" style="margin-top:0">Copy rows from Excel and paste below. Columns: Mark, Width, Height, Qty, Lock (yes = no rotation), Grinder X (mm), Grinder Y (mm).
+    <p class="hint" style="margin-top:0">Copy rows from Excel and paste below. Columns: Mark, Customer, Width, Height, Qty, Lock (yes = no rotation), Grinder X (mm), Grinder Y (mm).
       Width and height in the unit selected at the top (inches may be written 48 1/2 or 48.5). A header row is detected automatically; a header such as “Width (in)” or “Width (mm)” sets the unit.</p>
     <textarea id="paste-txt" placeholder="W1	1200	900	10		3	3&#10;W2	600	450	24	yes	0	0"></textarea>
     <label style="display:flex;gap:6px;align-items:center;margin-top:8px;font-size:13px"><input type="checkbox" id="paste-replace" checked> Replace the current panels</label>
@@ -290,7 +290,7 @@ const DEFAULT_STOCKS = [
   {use: false, name: '', w: 3660, h: 2140, qty: ''},
   {use: false, name: '', w: 3300, h: 2100, qty: ''},
 ];
-const blankPanel = () => ({mark: '', w: '', h: '', qty: '', lock: false, gx: '', gy: ''});
+const blankPanel = () => ({mark: '', cust: '', w: '', h: '', qty: '', lock: false, gx: '', gy: ''});
 let state = {unit: 'mm', panels: [blankPanel()], stocks: DEFAULT_STOCKS.map(s => ({...s})), trimX: 10, trimY: 10, kerf: 0, effort: 'auto', v: 4,
   project: null, dirty: false};   // project: the saved project on screen {id, co, name, customer, notes, savedAt, by, ...}; dirty: changed since saved/opened
 try {
@@ -341,6 +341,7 @@ function renderPanels(){
   const rows = state.panels.map((p, i) => `<tr data-i="${i}">
     <td class="idx">${i + 1}</td>
     <td><input type="text" data-k="mark" value="${esc(p.mark)}" placeholder="Mark"></td>
+    <td><input type="text" data-k="cust" value="${esc(p.cust ?? '')}" placeholder="Customer"></td>
     <td><input type="text" inputmode="decimal" data-k="w" value="${esc(lenInput(p.w))}"></td>
     <td><input type="text" inputmode="decimal" data-k="h" value="${esc(lenInput(p.h))}"></td>
     <td><input type="number" data-k="qty" value="${esc(p.qty)}" min="0" step="1"></td>
@@ -348,7 +349,7 @@ function renderPanels(){
     <td><input type="number" class="g" data-k="gy" value="${esc(p.gy)}" min="0" step="0.5" placeholder="0"></td>
     <td class="c"><input type="checkbox" data-k="lock" ${p.lock ? 'checked' : ''}></td>
     <td class="c"><button class="ghost" data-del title="Remove">✕</button></td></tr>`).join('');
-  $('#p-wrap').innerHTML = `<table><thead><tr><th class="n">#</th><th style="width:26%">Mark</th><th>Width (${U()})</th><th>Height (${U()})</th><th>Qty</th>
+  $('#p-wrap').innerHTML = `<table><thead><tr><th class="n">#</th><th style="width:15%">Mark</th><th style="width:18%">Customer</th><th>Width (${U()})</th><th>Height (${U()})</th><th>Qty</th>
     <th title="Grinding allowance added to the width, in mm">Grinder X (mm)</th><th title="Grinding allowance added to the height, in mm">Grinder Y (mm)</th>
     <th class="c" title="No rotation">Lock</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
   totals();
@@ -387,7 +388,7 @@ $('#p-wrap').addEventListener('keydown', e => {
 });
 function addPanelRow(){
   const last = state.panels[state.panels.length - 1] || {};
-  state.panels.push({...blankPanel(), gx: last.gx ?? '', gy: last.gy ?? ''});   // new rows keep the grinder of the row above
+  state.panels.push({...blankPanel(), cust: last.cust ?? '', gx: last.gx ?? '', gy: last.gy ?? ''});   // new rows keep the customer and grinder of the row above
   renderPanels(); save();
   const inp = $(`#p-wrap tr[data-i="${state.panels.length - 1}"] input[data-k="mark"]`); inp.focus(); inp.scrollIntoView({block: 'nearest'});
 }
@@ -401,7 +402,7 @@ $('#p-clear').onclick = () => {
 const truthy = v => /^(y|yes|1|true|lock|locked|no rotation|x|✓)$/i.test(String(v ?? '').trim());
 const unitOf = (h, fallback) => /\(in|inch|″|"/.test(h) ? 'in' : /mm/.test(h) ? 'mm' : fallback;
 // rows of cells -> panels (mm). A header row is used when found; without one the columns are, in order:
-// [Mark], Width, Height, Qty, Lock, Grinder X, Grinder Y (Mark when the first cell is not a size)
+// [Mark], [Customer], Width, Height, Qty, Lock, Grinder X, Grinder Y (Mark / Customer when those cells are not a size)
 function parseRows(rows){
   rows = rows.map(r => r.map(c => typeof c === 'number' ? c : String(c ?? '').trim())).filter(r => r.some(c => c !== ''));
   if (!rows.length) return [];
@@ -409,7 +410,8 @@ function parseRows(rows){
   const find = re => H.findIndex(c => re.test(c));
   let col = null, unit = state.unit;
   if (H.some(c => /width|^w\b|height|^h\b|length|qty|quantity|pcs/.test(c))) {
-    col = {mark: find(/mark|ref|name|item|label|code|desc/), w: find(/width|^w\b/), h: find(/height|length|^h\b|^l\b/),
+    const cu = find(/cust|client|party|buyer/);
+    col = {cust: cu, mark: H.findIndex((c, i) => i !== cu && /mark|ref|name|item|label|code|desc/.test(c)), w: find(/width|^w\b/), h: find(/height|length|^h\b|^l\b/),
       qty: find(/qty|quantity|pcs|nos|count|no\.? of/), lock: find(/lock|rotat/),
       gx: find(/grind.*\bx\b|\bx\b.*grind|^gx/), gy: find(/grind.*\by\b|\by\b.*grind|^gy/)};
     const g = find(/grind/); if (col.gx < 0 && col.gy < 0 && g >= 0) col.gx = col.gy = g;   // one grinder column = both sides
@@ -418,19 +420,23 @@ function parseRows(rows){
   const out = [];
   for (const r of rows) {
     let c = col;
-    if (!c) { const o = isFinite(parseLen(r[0], unit)) ? -1 : 0; c = {mark: o, w: o + 1, h: o + 2, qty: o + 3, lock: o + 4, gx: o + 5, gy: o + 6}; }
+    if (!c) {
+      const sz = v => isFinite(parseLen(v, unit));
+      const o = sz(r[0]) ? -1 : !sz(r[1]) && sz(r[2]) ? 1 : 0;   // -1: no mark; 1: mark and customer first
+      c = {mark: o >= 0 ? 0 : -1, cust: o === 1 ? 1 : -1, w: o + 1, h: o + 2, qty: o + 3, lock: o + 4, gx: o + 5, gy: o + 6};
+    }
     const cell = i => i >= 0 && i < r.length ? r[i] : '';
-    const p = {mark: String(cell(c.mark)), w: parseLen(cell(c.w), unit), h: parseLen(cell(c.h), unit), qty: num(cell(c.qty)),
+    const p = {mark: String(cell(c.mark)), cust: String(cell(c.cust)), w: parseLen(cell(c.w), unit), h: parseLen(cell(c.h), unit), qty: num(cell(c.qty)),
       lock: truthy(cell(c.lock)), gx: num(cell(c.gx)), gy: num(cell(c.gy))};
     if (!(p.w > 0 && p.h > 0)) continue;
-    out.push({mark: p.mark, w: p.w, h: p.h, qty: p.qty > 0 ? Math.round(p.qty) : 1, lock: p.lock,
+    out.push({mark: p.mark, cust: p.cust, w: p.w, h: p.h, qty: p.qty > 0 ? Math.round(p.qty) : 1, lock: p.lock,
       gx: p.gx > 0 ? p.gx : '', gy: p.gy > 0 ? p.gy : ''});
   }
   return out;
 }
 function addParsed(list, replace){
   if (!list.length) { alert('No panels found. Each row needs a width and a height.'); return; }
-  const keep = replace ? [] : state.panels.filter(p => p.w !== '' || p.h !== '' || String(p.mark).trim());
+  const keep = replace ? [] : state.panels.filter(p => p.w !== '' || p.h !== '' || String(p.mark).trim() || String(p.cust ?? '').trim());
   state.panels = keep.concat(list); renderPanels(); changed();
   setStatus(`${fmt(list.length)} rows imported (${fmt(list.reduce((a, p) => a + p.qty, 0))} pcs).`);
 }
@@ -452,10 +458,11 @@ $('#p-file').onchange = async e => {
 };
 $('#p-tpl').onclick = () => {
   const inch = state.unit === 'in', u = inch ? 'in' : 'mm';
-  const ws = XLSX.utils.aoa_to_sheet([['Mark', `Width (${u})`, `Height (${u})`, 'Qty', 'Lock', 'Grinder X (mm)', 'Grinder Y (mm)'],
-    inch ? ['W1', '47 1/4', '35 7/16', 10, '', 3, 3] : ['W1', 1200, 900, 10, '', 3, 3],
-    inch ? ['W2', 23.625, '17 3/4', 24, 'yes', 0, 0] : ['W2', 600, 450, 24, 'yes', 0, 0]]);
-  ws['!cols'] = [{wch: 16}, {wch: 12}, {wch: 12}, {wch: 8}, {wch: 8}, {wch: 15}, {wch: 15}];
+  const ws = XLSX.utils.aoa_to_sheet([['Mark', 'Customer', `Width (${u})`, `Height (${u})`, 'Qty', 'Lock', 'Grinder X (mm)', 'Grinder Y (mm)'],
+    inch ? ['W1', 'Customer A', '47 1/4', '35 7/16', 10, '', 3, 3] : ['W1', 'Customer A', 1200, 900, 10, '', 3, 3],
+    inch ? ['W2', 'Customer A', 23.625, '17 3/4', 24, 'yes', 0, 0] : ['W2', 'Customer A', 600, 450, 24, 'yes', 0, 0],
+    inch ? ['D1', 'Customer B', '31 1/2', '78 3/4', 6, '', 2, 2] : ['D1', 'Customer B', 800, 2000, 6, '', 2, 2]]);
+  ws['!cols'] = [{wch: 16}, {wch: 22}, {wch: 12}, {wch: 12}, {wch: 8}, {wch: 8}, {wch: 15}, {wch: 15}];
   const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'Panels'); XLSX.writeFile(wb, `glass-panels-template-${u}.xlsx`);
 };
 
@@ -499,7 +506,7 @@ const run = {t0: 0, snap: null, runs: 0};   // the search running now: start tim
 function buildJob(){
   const panels = [], bad = [];
   state.panels.forEach((p, i) => {
-    if (!String(p.mark).trim() && p.w === '' && p.h === '' && String(p.qty) === '') return;   // empty row
+    if (!String(p.mark).trim() && !String(p.cust ?? '').trim() && p.w === '' && p.h === '' && String(p.qty) === '') return;   // empty row
     const okLen = v => typeof v === 'number' && v > 0, q = num(p.qty);
     const g = v => String(v ?? '').trim() === '' ? 0 : num(v);
     const gx = g(p.gx), gy = g(p.gy);
@@ -507,7 +514,7 @@ function buildJob(){
     if (!okLen(p.w)) errs.push('w'); if (!okLen(p.h)) errs.push('h'); if (!(q > 0) || q !== Math.round(q)) errs.push('qty');
     if (!(gx >= 0)) errs.push('gx'); if (!(gy >= 0)) errs.push('gy');
     if (errs.length) errs.forEach(k => bad.push([i, k]));
-    else panels.push({mark: String(p.mark).trim(), w: p.w, h: p.h, qty: q, lock: !!p.lock, gx, gy});
+    else panels.push({mark: String(p.mark).trim(), cust: String(p.cust ?? '').trim(), w: p.w, h: p.h, qty: q, lock: !!p.lock, gx, gy});
   });
   const stocks = state.stocks.filter(s => s.use && typeof s.w === 'number' && typeof s.h === 'number' && s.w > 0 && s.h > 0)
     .map(s => ({name: stockName(s), w: s.w, h: s.h, qty: s.qty === '' || s.qty == null ? '' : num(s.qty)}));
@@ -573,7 +580,10 @@ function done(){
 // ---------- results ----------
 const PALETTE = [210, 32, 145, 275, 5, 180, 60, 320, 100, 240, 20, 160, 295, 45, 195, 345, 120, 260, 80, 0];
 const colour = t => { const h = PALETTE[t % PALETTE.length], l = 82 - (Math.floor(t / PALETTE.length) % 3) * 7; return {fill: `hsl(${h} 55% ${l}%)`, stroke: `hsl(${h} 45% 38%)`}; };
-const markText = list => list.map(m => m.mark ? (m.pcs > 1 ? `${m.mark} ×${m.pcs}` : m.mark) : (m.pcs > 1 ? `(no mark) ×${m.pcs}` : '(no mark)')).join(', ');
+const markText = list => list.map(m => { const n = m.mark || (m.cust ? '' : '(no mark)'), q = m.pcs > 1 ? ` ×${m.pcs}` : '';
+  return m.cust ? (n ? `${n}${q} (${m.cust})` : `${m.cust}${q}`) : n + q; }).join(', ');
+const custText = list => [...new Set(list.map(m => m.cust).filter(Boolean))].join(', ');
+const anyCust = res => res.types.some(t => (t.custs || []).length);
 // finished size of a placed piece, the way it lies on the sheet (the rectangle drawn is the cut size, with grinder)
 const finished = (r, res) => { const t = res.types[r.t], dw = t.dw ?? t.w, dh = t.dh ?? t.h; return r.r ? [dh, dw] : [dw, dh]; };
 // an offcut worth keeping: at least 9" x 12" (228.6 x 304.8 mm), either way round; smaller ones are waste
@@ -612,12 +622,17 @@ function sheetSvg(p, res){
     }
     out.push(`<text class="dim" x="${ocx}" y="${ocy}" font-size="${ofs}" text-anchor="middle" dominant-baseline="middle"${vert ? ` transform="rotate(-90 ${ocx} ${ocy})"` : ''}>${esc(ot)}</text>`);
   }
-  for (const r of p.placed) {
+  p.placed.forEach((r, ri) => {
     const c = colour(r.t), x = TX + r.x, y = TY + r.y;
     out.push(`<rect x="${x}" y="${y}" width="${r.w}" height="${r.h}" fill="${c.fill}" stroke="${c.stroke}" stroke-width="${W / 700}"/>`);
-    const mk = (res.types[r.t].marks || []);
-    const mtxt = (mk.length === 1 ? mk[0] : mk.length > 1 ? mk[0] + ' +' + (mk.length - 1) : '');
-    const mshort = (mtxt.length > 16 ? mtxt.slice(0, 15) + '…' : mtxt) + (r.r ? (mtxt ? ' ↻' : '↻') : '');
+    // mark and customer of this piece (the same on every copy of the sheet), else of its size in this pattern
+    const pc = p.pieces && p.pieces[ri], pm = pc ? null : ((p.marks || []).find(m => m.t === r.t) || {}).marks || [];
+    const mks = pc ? [pc.mark].filter(Boolean) : [...new Set(pm.map(m => m.mark).filter(Boolean))];
+    const cus = pc ? [pc.cust].filter(Boolean) : [...new Set(pm.map(m => m.cust).filter(Boolean))];
+    const short = (t, n) => t.length > n ? t.slice(0, n - 1) + '…' : t;
+    const mtxt = mks.length === 1 ? mks[0] : mks.length > 1 ? mks[0] + ' +' + (mks.length - 1) : '';
+    const ctxt = short(cus.length === 1 ? cus[0] : cus.length > 1 ? cus[0] + ' +' + (cus.length - 1) : '', 22);
+    const mshort = short(mtxt, 16) + (r.r ? (mtxt ? ' ↻' : '↻') : '');
     // cut size (grinder included), each length written along its own edge: width along the top, height up the left side
     const tw = len(r.w), th = len(r.h), lw2 = tw.length * 0.62, lh2 = th.length * 0.62;
     // each label fits its edge; the two stay clear of each other in the top-left corner (one of them has to clear the other's band)
@@ -626,12 +641,16 @@ function sheetSvg(p, res){
       const ex = x + r.w / 2, ey = y + fsE * 0.75, hx = x + fsE * 0.75, hy = y + r.h / 2;
       out.push(`<text x="${ex}" y="${ey}" font-size="${fsE}" font-weight="600" text-anchor="middle" dominant-baseline="middle">${esc(tw)}</text>`);
       out.push(`<text x="${hx}" y="${hy}" font-size="${fsE}" font-weight="600" text-anchor="middle" dominant-baseline="middle" transform="rotate(-90 ${hx} ${hy})">${esc(th)}</text>`);
-      if (mshort) {   // mark (and ↻ when turned) in the space left inside the edge labels
-        const iw = r.w - fsE * 1.5, ih = r.h - fsE * 1.5, ml = mshort.length * 0.62;
-        const fm = Math.min(ih / 2.2, iw * 0.9 / ml, fsE * 1.1);
-        if (fm >= fsD * 0.4) out.push(`<text x="${x + fsE * 1.5 + iw / 2}" y="${y + fsE * 1.5 + ih / 2}" font-size="${fm}" text-anchor="middle" dominant-baseline="middle" opacity=".75">${esc(mshort)}</text>`);
+      if (mshort || ctxt) {   // mark (and ↻ when turned) and customer below it, in the space left inside the edge labels
+        const iw = r.w - fsE * 1.5, ih = r.h - fsE * 1.5, mx = x + fsE * 1.5 + iw / 2, my = y + fsE * 1.5 + ih / 2;
+        const fm = mshort ? Math.min(ih / 2.2, iw * 0.9 / (mshort.length * 0.62), fsE * 1.1) : 0;
+        const fc = ctxt ? Math.min(ih / 3.2, iw * 0.9 / (ctxt.length * 0.6), fsE * 0.85) : 0;
+        const showM = fm >= fsD * 0.4, showC = fc >= fsD * 0.35 && (!showM || ih > fm * 1.2 + fc * 1.3);
+        const gap = showM && showC ? (fm + fc) * 0.6 : 0;
+        if (showM) out.push(`<text x="${mx}" y="${my - gap / 2}" font-size="${fm}" text-anchor="middle" dominant-baseline="middle" opacity=".75">${esc(mshort)}</text>`);
+        if (showC) out.push(`<text x="${mx}" y="${my + gap / 2}" font-size="${fc}" font-style="italic" text-anchor="middle" dominant-baseline="middle" opacity=".7">${esc(ctxt)}</text>`);
       }
-      continue;
+      return;
     }
     // too small for edge labels: one centred "W × H" label as before
     const label = `${size(r.w, r.h)}${r.r ? ' ↻' : ''}`, ll = label.length * 0.62;
@@ -639,13 +658,13 @@ function sheetSvg(p, res){
     const fsH = Math.min(r.h / 3.2, r.w * 0.92 / ll, fsD * 1.6), fsV = Math.min(r.w / 3.2, r.h * 0.92 / ll, fsD * 1.6);
     const vert = fsV > fsH * 1.15, fs = vert ? fsV : fsH, across = vert ? r.w : r.h;   // across = room for a second line
     if (fs >= fsD * 0.5) {
-      const two = mtxt && across > fs * 3;
+      const sub = short([mtxt, ctxt].filter(Boolean).join(' · '), 24), two = sub && across > fs * 3;
       const cx = x + r.w / 2, cy = y + r.h / 2, tf = vert ? ` transform="rotate(-90 ${cx} ${cy})"` : '';
       out.push(`<g${tf}><text x="${cx}" y="${cy - (two ? fs * 0.55 : 0)}" font-size="${fs}" font-weight="600" text-anchor="middle" dominant-baseline="middle">${esc(label)}</text>`);
-      if (two) out.push(`<text x="${cx}" y="${cy + fs * 0.7}" font-size="${fs * 0.8}" text-anchor="middle" dominant-baseline="middle" opacity=".75">${esc(mtxt.length > 16 ? mtxt.slice(0, 15) + '…' : mtxt)}</text>`);
+      if (two) out.push(`<text x="${cx}" y="${cy + fs * 0.7}" font-size="${fs * 0.8}" text-anchor="middle" dominant-baseline="middle" opacity=".75">${esc(sub)}</text>`);
       out.push('</g>');
     }
-  }
+  });
   // cut lines, each edge to edge of the piece it splits: the trim cuts first, across the whole sheet, then the pattern's cuts
   const lw = Math.max(W, H) / 450, lines = [];
   if (TY > 0) lines.push([0, TY, W, TY], [0, H - TY, W, H - TY]);
@@ -683,7 +702,7 @@ function renderResults(job, res, quiet){
     setStatus(`Done: ${fmt(res.runs)} plans tried in ${s(res.ms)}; this plan was found at ${s(res.improvedAt || 0)}.${why}`);
   }
   const un = res.unplaced.length ? `<div class="alert"><b>${fmt(S.unplaced)} pcs could not be placed.</b><ul>${res.unplaced.map(u => {
-    const t = res.types[u.t]; return `<li>${esc(size(t.dw ?? t.w, t.dh ?? t.h))}${ground(t) ? ` (cut ${esc(size(t.w, t.h))})` : ''}${t.marks.length ? ' ' + esc(t.marks.join(', ')) : ''}: ${fmt(u.qty)} pcs, ${esc(u.reason)}</li>`;
+    const t = res.types[u.t]; return `<li>${esc(size(t.dw ?? t.w, t.dh ?? t.h))}${ground(t) ? ` (cut ${esc(size(t.w, t.h))})` : ''}${t.marks.length ? ' ' + esc(t.marks.join(', ')) : ''}${(t.custs || []).length ? ' (' + esc(t.custs.join(', ')) + ')' : ''}: ${fmt(u.qty)} pcs, ${esc(u.reason)}</li>`;
   }).join('')}</ul></div>` : '';
   const when = new Date(lastWhen).toLocaleString('en-IN', {dateStyle: 'medium', timeStyle: 'short'}), P = curProject();
   el.innerHTML = `
@@ -704,7 +723,7 @@ function renderResults(job, res, quiet){
         <div class="card-h"><div class="t">Pattern ${p.no} <span class="x">× ${fmt(p.count)}</span></div>
           <div class="m">${esc(size(p.sheetW, p.sheetH))} · ${p.placed.length} pcs/sheet · yield ${(p.yield * 100).toFixed(1)}%</div></div>
         <div class="card-b">${sheetSvg(p, res)}</div>
-        <table><thead><tr><th>Size</th><th class="n">Per sheet</th><th class="n">Total</th><th>Marks</th></tr></thead><tbody>${patternRows(p, res)}</tbody></table>
+        <table><thead><tr><th>Size</th><th class="n">Per sheet</th><th class="n">Total</th><th>${anyCust(res) ? 'Marks (customer)' : 'Marks'}</th></tr></thead><tbody>${patternRows(p, res)}</tbody></table>
       </article>`).join('')}</div>`;
   $('#r-print').onclick = () => window.print();
   $('#r-save').onclick = () => openSave();
@@ -720,22 +739,25 @@ function exportXlsx(job, res){
   sum.push(['Total', S.sheets, xlArea(S.sheetArea), xlArea(S.panelArea), +(S.panelArea / S.sheetArea * 100).toFixed(2)], [],
     ['Panels placed', S.pcs], ['Panels ordered', S.total], ['Panels not placed', S.unplaced], ['Cutting patterns', res.patterns.length],
     ['Edge trim X (mm, left & right)', res.trimX], ['Edge trim Y (mm, top & bottom)', res.trimY], ['Kerf (mm)', res.kerf]);
-  res.unplaced.forEach(x => { const t = res.types[x.t]; sum.push([`Not placed: ${size(t.dw ?? t.w, t.dh ?? t.h)}`, x.qty, x.reason, t.marks.join(', ')]); });
+  res.unplaced.forEach(x => { const t = res.types[x.t]; sum.push([`Not placed: ${size(t.dw ?? t.w, t.dh ?? t.h)}`, x.qty, x.reason, t.marks.join(', '), (t.custs || []).join(', ')]); });
   const ws1 = XLSX.utils.aoa_to_sheet(sum); ws1['!cols'] = [{wch: 30}, {wch: 12}, {wch: 14}, {wch: 14}, {wch: 10}];
   XLSX.utils.book_append_sheet(wb, ws1, 'Summary');
 
-  const plan = [['Pattern', 'Sheet size', 'Sheets', 'Yield %', `Finished W (${u})`, `Finished H (${u})`, `Cut W (${u})`, `Cut H (${u})`, 'Rotated', 'Pcs per sheet', 'Total pcs', 'Marks']];
+  const plan = [['Pattern', 'Sheet size', 'Sheets', 'Yield %', `Finished W (${u})`, `Finished H (${u})`, `Cut W (${u})`, `Cut H (${u})`, 'Rotated', 'Pcs per sheet', 'Total pcs', 'Marks', 'Customers']];
   for (const p of res.patterns) {
     const marks = new Map(p.marks.map(m => [m.t, m.marks]));
     groups(p, res).forEach((e, i) => plan.push([p.no, size(p.sheetW, p.sheetH), i ? '' : p.count, i ? '' : +(p.yield * 100).toFixed(2),
-      xlLen(e.f[0]), xlLen(e.f[1]), xlLen(e.w), xlLen(e.h), e.r ? 'yes' : '', e.n, e.n * p.count, markText(marks.get(e.t) || [])]));
+      xlLen(e.f[0]), xlLen(e.f[1]), xlLen(e.w), xlLen(e.h), e.r ? 'yes' : '', e.n, e.n * p.count, markText(marks.get(e.t) || []), custText(marks.get(e.t) || [])]));
   }
-  const ws2 = XLSX.utils.aoa_to_sheet(plan); ws2['!cols'] = [{wch: 8}, {wch: 18}, {wch: 8}, {wch: 8}, {wch: 13}, {wch: 13}, {wch: 11}, {wch: 11}, {wch: 8}, {wch: 12}, {wch: 10}, {wch: 50}];
+  const ws2 = XLSX.utils.aoa_to_sheet(plan); ws2['!cols'] = [{wch: 8}, {wch: 18}, {wch: 8}, {wch: 8}, {wch: 13}, {wch: 13}, {wch: 11}, {wch: 11}, {wch: 8}, {wch: 12}, {wch: 10}, {wch: 50}, {wch: 30}];
   XLSX.utils.book_append_sheet(wb, ws2, 'Cutting plan');
 
-  const layout = [['Pattern', 'Sheets', 'Piece', `X (${u})`, `Y (${u})`, `Cut W (${u})`, `Cut H (${u})`, `Finished W (${u})`, `Finished H (${u})`, 'Rotated']];
-  for (const p of res.patterns) p.placed.forEach((r, i) => { const f = finished(r, res);
-    layout.push([p.no, i ? '' : p.count, i + 1, xlLen(r.x + res.trimX), xlLen(r.y + res.trimY), xlLen(r.w), xlLen(r.h), xlLen(f[0]), xlLen(f[1]), r.r ? 'yes' : '']); });
+  const layout = [['Pattern', 'Sheets', 'Piece', `X (${u})`, `Y (${u})`, `Cut W (${u})`, `Cut H (${u})`, `Finished W (${u})`, `Finished H (${u})`, 'Rotated', 'Mark', 'Customer']];
+  // mark / customer of a piece: its own when every copy of the sheet has the same, else all of its size in the pattern
+  for (const p of res.patterns) p.placed.forEach((r, i) => { const f = finished(r, res), pc = p.pieces && p.pieces[i];
+    const pm = pc ? [] : ((p.marks || []).find(m => m.t === r.t) || {}).marks || [], all = k => [...new Set(pm.map(m => m[k]).filter(Boolean))].join(', ');
+    layout.push([p.no, i ? '' : p.count, i + 1, xlLen(r.x + res.trimX), xlLen(r.y + res.trimY), xlLen(r.w), xlLen(r.h), xlLen(f[0]), xlLen(f[1]), r.r ? 'yes' : '',
+      pc ? pc.mark : all('mark'), pc ? pc.cust : all('cust')]); });
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(layout), 'Positions');
 
   // offcuts of 9 x 12 in (228.6 x 304.8 mm) or more, per sheet of each pattern
@@ -745,8 +767,8 @@ function exportXlsx(job, res){
   const ws4 = XLSX.utils.aoa_to_sheet(offs); ws4['!cols'] = [{wch: 8}, {wch: 8}, {wch: 13}, {wch: 13}, {wch: 10}, {wch: 10}, {wch: 12}];
   XLSX.utils.book_append_sheet(wb, ws4, 'Offcuts');
 
-  const pan = [['Mark', `Width (${u})`, `Height (${u})`, 'Qty', 'Lock', 'Grinder X (mm)', 'Grinder Y (mm)']];
-  job.panels.forEach(p => pan.push([p.mark, u === 'in' ? inchText(p.w) : xlLen(p.w), u === 'in' ? inchText(p.h) : xlLen(p.h), p.qty, p.lock ? 'yes' : '', p.gx || '', p.gy || '']));
+  const pan = [['Mark', 'Customer', `Width (${u})`, `Height (${u})`, 'Qty', 'Lock', 'Grinder X (mm)', 'Grinder Y (mm)']];
+  job.panels.forEach(p => pan.push([p.mark, p.cust || '', u === 'in' ? inchText(p.w) : xlLen(p.w), u === 'in' ? inchText(p.h) : xlLen(p.h), p.qty, p.lock ? 'yes' : '', p.gx || '', p.gy || '']));
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(pan), 'Panels');
   const pn = P ? P.name.replace(/[\\/:*?"<>|]+/g, ' ').trim().slice(0, 60) + '-' : '';
   XLSX.writeFile(wb, `cutting-plan-${pn}${new Date().toISOString().slice(0, 10)}.xlsx`);
@@ -866,7 +888,7 @@ $('#pj-list').addEventListener('click', async e => {
   }
   if (e.target.closest('[data-open]')) openProject(p);
 });
-const hasInput = () => state.panels.some(p => p.w !== '' || p.h !== '' || String(p.mark).trim());
+const hasInput = () => state.panels.some(p => p.w !== '' || p.h !== '' || String(p.mark).trim() || String(p.cust ?? '').trim());
 async function openProject(p){
   if (worker) { alert('Stop the search first.'); return; }
   if (state.dirty && hasInput() && !confirm(`Open “${p.name}”? The panels and settings on screen${curProject() ? ' (changed since saved)' : ' (not saved)'} will be replaced.`)) return;
