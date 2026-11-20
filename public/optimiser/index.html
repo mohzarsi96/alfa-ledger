@@ -305,14 +305,35 @@ const xlArea = mm2 => state.unit === 'in' ? +(mm2 / 92903.04).toFixed(3) : +(mm2
 
 // ---------- state ----------
 const DEFAULT_STOCKS = [
-  {use: true, name: '', w: 2440, h: 2100, qty: ''},
-  {use: false, name: '', w: 2800, h: 2100, qty: ''},
-  {use: false, name: '', w: 2440, h: 1830, qty: ''},
-  {use: false, name: '', w: 3660, h: 2140, qty: ''},
-  {use: false, name: '', w: 3300, h: 2100, qty: ''},
+  {use: true, name: '', w: 2100, h: 2440, qty: ''},
+  {use: false, name: '', w: 2100, h: 2800, qty: ''},
+  {use: false, name: '', w: 1830, h: 2440, qty: ''},
+  {use: false, name: '', w: 2140, h: 3660, qty: ''},
+  {use: false, name: '', w: 2100, h: 3300, qty: ''},
 ];
+// Up to v4 sheet sizes were entered the other way round (2440 x 2100 for a 2100-wide, 2440-high sheet).
+// From v5 they are width x height as written on the sheet. Older inputs, jobs and saved plans are turned on load:
+// stock width <-> height, trim X <-> Y, and a plan is drawn with every sheet turned a quarter (same cuts).
+const swapWH = o => { if (o && typeof o === 'object') { const w = o.w; o.w = o.h; o.h = w; } return o; };
+function turnInputs(x){   // inputs or a job: stocks and trims
+  if (!x) return x;
+  (x.stocks || []).forEach(swapWH);
+  const tx = x.trimX; x.trimX = x.trimY; x.trimY = tx;
+  return x;
+}
+function turnPlan(res){
+  if (!res) return res;
+  const tx = res.trimX; res.trimX = res.trimY; res.trimY = tx;
+  for (const p of res.patterns || []) {
+    const sw = p.sheetW; p.sheetW = p.sheetH; p.sheetH = sw;
+    for (const r of p.placed || []) { const x = r.x; r.x = r.y; r.y = x; swapWH(r); r.r = !r.r; }
+    for (const o of p.offcuts || []) { const x = o.x; o.x = o.y; o.y = x; swapWH(o); }
+    p.cuts = (p.cuts || []).map(([x1, y1, x2, y2]) => [y1, x1, y2, x2]);
+  }
+  return res;
+}
 const blankPanel = () => ({mark: '', cust: '', site: '', w: '', h: '', qty: '', lock: false, gx: '', gy: ''});
-let state = {unit: 'mm', panels: [blankPanel()], stocks: DEFAULT_STOCKS.map(s => ({...s})), trimX: 10, trimY: 10, kerf: 0, effort: 'auto', v: 4,
+let state = {unit: 'mm', panels: [blankPanel()], stocks: DEFAULT_STOCKS.map(s => ({...s})), trimX: 10, trimY: 10, kerf: 0, effort: 'auto', v: 5,
   project: null, dirty: false};   // project: the saved project on screen {id, co, name, customer, notes, savedAt, by, ...}; dirty: changed since saved/opened
 try {
   const s = JSON.parse(localStorage.getItem(KEY) || 'null');
@@ -327,7 +348,9 @@ try {
     }
     if (s.dirty === undefined) s.dirty = true;               // inputs from before projects existed: not saved
     if (!(s.v >= 4)) s.effort = 'auto';                      // search time default: Auto
-    s.v = 4; state = {...state, ...s};
+    const turned = !(s.v >= 5); if (turned) turnInputs(s);   // sheet sizes: width x height the other way round
+    s.v = 5; state = {...state, ...s};
+    if (turned) localStorage.setItem(KEY, JSON.stringify(state));
   }
 } catch (e) {}
 let saveT = 0;
@@ -967,8 +990,8 @@ async function doSave(asNew){
   const S = summarise(lastJob, lastRes), savedAt = new Date().toISOString();
   const meta = {name, customer: $('#sv-cust').value.trim(), notes: $('#sv-notes').value.trim(), unit: state.unit,
     rows: lastJob.panels.length, pcs: S.total, placed: S.pcs, sheets: S.sheets, yield: S.sheetArea ? +(S.panelArea / S.sheetArea * 100).toFixed(2) : 0,
-    sheetSizes: S.per.map(e => `${e.count} × ${size(e.w, e.h)}`).join(', '), plannedAt: lastWhen, savedAt, createdAt: P && P.createdAt || savedAt};
-  const data = {v: 1, inputs: await zip(pack(inputs())), job: await zip(pack(lastJob)), plan: await zip(pack(lastRes))};
+    sheetSizes: S.per.map(e => `${e.count} × ${size(e.w, e.h)}`).join(', '), plannedAt: lastWhen, savedAt, createdAt: P && P.createdAt || savedAt, sv: 2};
+  const data = {v: 2, inputs: await zip(pack(inputs())), job: await zip(pack(lastJob)), plan: await zip(pack(lastRes))};
   const bytes = data.inputs.length + data.job.length + data.plan.length;
   if (bytes > 950000) { $('#sv-err').textContent = `This plan is too big to save (${fmt(bytes / 1e6, 1)} MB; the limit is about 0.9 MB). Split the job into smaller ones.`; return; }
   $('#sv-ok').disabled = $('#sv-new').disabled = true; $('#sv-err').textContent = 'Saving…';
@@ -998,7 +1021,7 @@ function listProjects(){
     : !rows.length ? '<div class="empty">No project matches.</div>'
     : `<table><thead><tr><th>Project</th><th class="n">Pcs</th><th>Sheets</th><th>Saved</th><th></th></tr></thead><tbody>${rows.map(p => `
       <tr data-id="${esc(p.id)}" class="${P && p.id === P.id ? 'cur' : ''}"><td><b>${esc(p.name)}</b>${p.customer ? `<div class="pm">${esc(p.customer)}</div>` : ''}${p.notes ? `<div class="pm">${esc(p.notes.length > 90 ? p.notes.slice(0, 89) + '…' : p.notes)}</div>` : ''}</td>
-        <td class="n">${fmt(p.pcs || 0)}</td><td>${fmt(p.sheets || 0)}<div class="pm">${esc(p.sheetSizes || '')}${p.yield ? ' · yield ' + p.yield + '%' : ''}</div></td>
+        <td class="n">${fmt(p.pcs || 0)}</td><td>${fmt(p.sheets || 0)}<div class="pm">${esc(p.sv >= 2 ? p.sheetSizes || '' : String(p.sheetSizes || '').split(', ').map(x => { const a = x.split(' × '); return a.length === 3 ? [a[0], a[2], a[1]].join(' × ') : x; }).join(', '))}${p.yield ? ' · yield ' + p.yield + '%' : ''}</div></td>
         <td>${esc(whenText(p.savedAt))}${p.by ? `<div class="pm">${esc(p.by)}</div>` : ''}</td>
         <td class="c" style="white-space:nowrap"><button data-open>Open</button> <button class="ghost" data-del title="Delete">✕</button></td></tr>`).join('')}</tbody></table>`;
 }
@@ -1026,13 +1049,19 @@ async function openProject(p){
   let inp, job, plan;
   try { [inp, job, plan] = await Promise.all([got.data.inputs, got.data.job, got.data.plan].map(unzip)); }
   catch (err) { alert('Could not read the project: ' + (err.message || err)); return; }
-  state = {...state, ...JSON.parse(inp), v: 4, project: {...meta, id: p.id, co: STORE.co()}, dirty: false}; save();
+  const old = !(got.data.v >= 2);   // saved before sheet width / height were swapped
+  const ins = JSON.parse(inp); if (old) turnInputs(ins);
+  state = {...state, ...ins, v: 5, project: {...meta, id: p.id, co: STORE.co()}, dirty: false}; save();
   ['trimX', 'trimY', 'kerf', 'effort'].forEach(k => { $('#' + k).value = state[k]; });
   $('#proj-dlg').close(); clearResults(); showUnit(); renderPanels(); renderStocks(); showProject();
   if (plan && job) {
     lastJob = JSON.parse(job); lastRes = JSON.parse(plan); lastWhen = meta.plannedAt || meta.savedAt;
+    if (old) { turnInputs(lastJob); turnPlan(lastRes); }
     renderResults(lastJob, lastRes, true);
-    setStatus(`Opened “${meta.name}” with its saved cutting plan. Optimise again only if you want to look for a new plan.`);
+    const locked = old && lastJob.panels.some(x => x.lock);
+    setStatus(`Opened “${meta.name}” with its saved cutting plan.` + (locked
+      ? ' It was planned before sheet width and height were swapped and has locked panels: press Optimise to plan them the right way round.'
+      : ' Optimise again only if you want to look for a new plan.'));
   } else setStatus(`Opened “${meta.name}”.`);
 }
 function newProject(){
