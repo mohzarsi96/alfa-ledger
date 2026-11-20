@@ -93,6 +93,7 @@ input[type=checkbox]{accent-color:var(--accent);width:16px;height:16px}
 .kpi .l{font-size:12px;color:var(--ink-soft)}
 .kpi .v{font:600 22px "IBM Plex Mono",monospace;margin-top:2px}
 .kpi .s{font-size:12px;color:var(--ink-faint);margin-top:2px}
+.kpi .v small{font-size:13px;font-weight:500;color:var(--ink-soft)}
 .kpi.hi{border-color:var(--accent-2);background:var(--accent-soft)}
 .kpi.hi .v{color:var(--accent-ink)}
 .alert{border:1px solid var(--warn);background:var(--warn-soft);color:var(--warn);border-radius:var(--radius);padding:10px 14px;margin-bottom:14px}
@@ -605,7 +606,7 @@ function summarise(job, res){
 
 function sheetSvg(p, res){
   const TX = res.trimX, TY = res.trimY, W = p.sheetW, H = p.sheetH, pad = Math.max(W, H) * 0.045, fsD = Math.max(W, H) * 0.022;
-  const out = [`<svg viewBox="${-pad} ${-pad} ${W + pad * 1.4} ${H + pad * 1.4}" role="img" aria-label="Pattern ${p.no}: ${esc(size(W, H))} sheet">`];
+  const out = [`<svg viewBox="${-pad} ${-pad} ${W + pad * 1.4} ${H + pad * 1.4}" role="img" aria-label="Layout ${p.no}: ${esc(size(W, H))} sheet">`];
   out.push(`<rect x="0" y="0" width="${W}" height="${H}" style="fill:var(--trim);stroke:var(--ink-soft)" stroke-width="${W / 600}"/>`);
   out.push(`<rect x="${TX}" y="${TY}" width="${W - 2 * TX}" height="${H - 2 * TY}" style="fill:var(--sheet)"/>`);
   // every leftover piece is shaded; its size is written when it is at least 9" x 12" (228.6 x 304.8 mm) either way round
@@ -714,13 +715,13 @@ function renderResults(job, res, quiet){
       <div class="kpi hi"><div class="l">Sheets needed</div><div class="v">${fmt(S.sheets)}</div><div class="s">${S.per.map(e => `${fmt(e.count)} × ${esc(size(e.w, e.h))}`).join(' · ')}</div></div>
       <div class="kpi hi"><div class="l">Yield</div><div class="v">${yieldPct.toFixed(1)}%</div><div class="s">waste ${area(S.sheetArea - S.panelArea)} ${areaUnit()}</div></div>
       <div class="kpi"><div class="l">Panels placed</div><div class="v">${fmt(S.pcs)}</div><div class="s">of ${fmt(S.total)} pcs</div></div>
-      <div class="kpi"><div class="l">Glass cut${anyGround ? ' (with grinder)' : ''}</div><div class="v">${area(S.panelArea)}</div><div class="s">${areaUnit()} of ${area(S.sheetArea)} ${areaUnit()} sheet</div></div>
-      <div class="kpi"><div class="l">Cutting patterns</div><div class="v">${fmt(res.patterns.length)}</div><div class="s">distinct sheet layouts</div></div>
+      <div class="kpi"><div class="l">Glass cut</div><div class="v">${area(S.sheetArea)} <small>${areaUnit()}</small></div><div class="s">panels ${area(S.panelArea)} ${areaUnit()}${anyGround ? ' (with grinder)' : ''}</div></div>
+      <div class="kpi"><div class="l">Cutting layouts</div><div class="v">${fmt(res.patterns.length)}</div><div class="s">distinct sheet layouts</div></div>
     </div>
     ${un}
     <div class="patterns">${res.patterns.map(p => `
       <article class="card pat">
-        <div class="card-h"><div class="t">Pattern ${p.no} <span class="x">× ${fmt(p.count)}</span></div>
+        <div class="card-h"><div class="t">Layout ${p.no} <span class="x">× ${fmt(p.count)}</span></div>
           <div class="m">${esc(size(p.sheetW, p.sheetH))} · ${p.placed.length} pcs/sheet · yield ${(p.yield * 100).toFixed(1)}%</div></div>
         <div class="card-b">${sheetSvg(p, res)}</div>
         <table><thead><tr><th>Size</th><th class="n">Per sheet</th><th class="n">Total</th><th>${anyCust(res) ? 'Marks (customer)' : 'Marks'}</th></tr></thead><tbody>${patternRows(p, res)}</tbody></table>
@@ -737,13 +738,13 @@ function exportXlsx(job, res){
     ['Sheet size', 'Sheets', `Sheet ${au}`, `Glass cut ${au}`, 'Yield %']];
   S.per.forEach(e => sum.push([size(e.w, e.h), e.count, xlArea(e.area), xlArea(e.used), +(e.used / e.area * 100).toFixed(2)]));
   sum.push(['Total', S.sheets, xlArea(S.sheetArea), xlArea(S.panelArea), +(S.panelArea / S.sheetArea * 100).toFixed(2)], [],
-    ['Panels placed', S.pcs], ['Panels ordered', S.total], ['Panels not placed', S.unplaced], ['Cutting patterns', res.patterns.length],
+    ['Panels placed', S.pcs], ['Panels ordered', S.total], ['Panels not placed', S.unplaced], ['Cutting layouts', res.patterns.length],
     ['Edge trim X (mm, left & right)', res.trimX], ['Edge trim Y (mm, top & bottom)', res.trimY], ['Kerf (mm)', res.kerf]);
   res.unplaced.forEach(x => { const t = res.types[x.t]; sum.push([`Not placed: ${size(t.dw ?? t.w, t.dh ?? t.h)}`, x.qty, x.reason, t.marks.join(', '), (t.custs || []).join(', ')]); });
   const ws1 = XLSX.utils.aoa_to_sheet(sum); ws1['!cols'] = [{wch: 30}, {wch: 12}, {wch: 14}, {wch: 14}, {wch: 10}];
   XLSX.utils.book_append_sheet(wb, ws1, 'Summary');
 
-  const plan = [['Pattern', 'Sheet size', 'Sheets', 'Yield %', `Finished W (${u})`, `Finished H (${u})`, `Cut W (${u})`, `Cut H (${u})`, 'Rotated', 'Pcs per sheet', 'Total pcs', 'Marks', 'Customers']];
+  const plan = [['Layout', 'Sheet size', 'Sheets', 'Yield %', `Finished W (${u})`, `Finished H (${u})`, `Cut W (${u})`, `Cut H (${u})`, 'Rotated', 'Pcs per sheet', 'Total pcs', 'Marks', 'Customers']];
   for (const p of res.patterns) {
     const marks = new Map(p.marks.map(m => [m.t, m.marks]));
     groups(p, res).forEach((e, i) => plan.push([p.no, size(p.sheetW, p.sheetH), i ? '' : p.count, i ? '' : +(p.yield * 100).toFixed(2),
@@ -752,7 +753,7 @@ function exportXlsx(job, res){
   const ws2 = XLSX.utils.aoa_to_sheet(plan); ws2['!cols'] = [{wch: 8}, {wch: 18}, {wch: 8}, {wch: 8}, {wch: 13}, {wch: 13}, {wch: 11}, {wch: 11}, {wch: 8}, {wch: 12}, {wch: 10}, {wch: 50}, {wch: 30}];
   XLSX.utils.book_append_sheet(wb, ws2, 'Cutting plan');
 
-  const layout = [['Pattern', 'Sheets', 'Piece', `X (${u})`, `Y (${u})`, `Cut W (${u})`, `Cut H (${u})`, `Finished W (${u})`, `Finished H (${u})`, 'Rotated', 'Mark', 'Customer']];
+  const layout = [['Layout', 'Sheets', 'Piece', `X (${u})`, `Y (${u})`, `Cut W (${u})`, `Cut H (${u})`, `Finished W (${u})`, `Finished H (${u})`, 'Rotated', 'Mark', 'Customer']];
   // mark / customer of a piece: its own when every copy of the sheet has the same, else all of its size in the pattern
   for (const p of res.patterns) p.placed.forEach((r, i) => { const f = finished(r, res), pc = p.pieces && p.pieces[i];
     const pm = pc ? [] : ((p.marks || []).find(m => m.t === r.t) || {}).marks || [], all = k => [...new Set(pm.map(m => m[k]).filter(Boolean))].join(', ');
@@ -761,7 +762,7 @@ function exportXlsx(job, res){
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(layout), 'Positions');
 
   // offcuts of 9 x 12 in (228.6 x 304.8 mm) or more, per sheet of each pattern
-  const offs = [['Pattern', 'Sheets', `Offcut W (${u})`, `Offcut H (${u})`, `X (${u})`, `Y (${u})`, 'Total offcuts']];
+  const offs = [['Layout', 'Sheets', `Offcut W (${u})`, `Offcut H (${u})`, `X (${u})`, `Y (${u})`, 'Total offcuts']];
   for (const p of res.patterns) p.offcuts.filter(usableOffcut).forEach((o, i) =>
     offs.push([p.no, i ? '' : p.count, xlLen(o.w), xlLen(o.h), xlLen(o.x + res.trimX), xlLen(o.y + res.trimY), p.count]));
   const ws4 = XLSX.utils.aoa_to_sheet(offs); ws4['!cols'] = [{wch: 8}, {wch: 8}, {wch: 13}, {wch: 13}, {wch: 10}, {wch: 10}, {wch: 12}];
